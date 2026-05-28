@@ -203,17 +203,23 @@ async function renderReview(sessionId) {
   app.querySelectorAll("[data-delete-event]").forEach((button) => {
     button.addEventListener("click", async () => deleteEvent(sessionId, button.dataset.deleteEvent));
   });
+  app.querySelectorAll("[data-redact-top]").forEach((button) => {
+    button.addEventListener("click", async () => redactTopStrip(sessionId, button.dataset.redactTop));
+  });
 }
 
 function renderEventEditor(sessionId, event) {
   const tags = Array.isArray(event.tags) ? event.tags.join(", ") : "";
   const checked = event.highlight ? "checked" : "";
   const imageUrl = `/api/sessions/${encodeURIComponent(sessionId)}/screenshots/${encodeURIComponent(event.screenshot || "")}`;
+  const redactionCount = Array.isArray(event.redactions) ? event.redactions.length : 0;
+  const redactionLabel = redactionCount ? `<p class="redaction-count">${redactionCount} redaction${redactionCount === 1 ? "" : "s"} applied</p>` : "";
   return `
     <article class="card event-editor">
       <div>
         <img class="event-thumb" src="${imageUrl}" alt="Screenshot ${escapeAttr(event.index || "")}">
         <p class="muted">${escapeHtml(event.type)} - ${escapeHtml(event.timestamp || "")}</p>
+        ${redactionLabel}
       </div>
       <div class="form">
         <label>Title <input data-field="title" data-event="${event.index}" value="${escapeAttr(event.title || "")}"></label>
@@ -223,6 +229,7 @@ function renderEventEditor(sessionId, event) {
         <label class="check-row"><input type="checkbox" data-field="highlight" data-event="${event.index}" ${checked}> Mark as highlight</label>
         <div class="actions">
           <button class="primary" data-save-event="${event.index}">Save evidence note</button>
+          <button class="secondary" data-redact-top="${event.index}">Redact top strip</button>
           <button class="danger" data-delete-event="${event.index}">Remove from report</button>
         </div>
       </div>
@@ -252,6 +259,14 @@ async function deleteEvent(sessionId, eventIndex) {
     return;
   }
   await api.delete(`/api/sessions/${sessionId}/events/${eventIndex}`);
+  await renderReview(sessionId);
+}
+
+async function redactTopStrip(sessionId, eventIndex) {
+  if (!confirm("Apply a black redaction strip across the top of this screenshot? A backup of the original is kept locally.")) {
+    return;
+  }
+  await api.post(`/api/sessions/${sessionId}/events/${eventIndex}/redact`, { preset: "top_strip" });
   await renderReview(sessionId);
 }
 

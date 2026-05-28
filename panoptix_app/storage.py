@@ -85,7 +85,7 @@ class SessionStore:
 
     def update_event(self, session_id: str, event_index: int, changes: dict[str, Any]) -> dict[str, Any]:
         session = self.load_session(session_id)
-        allowed = {"title", "staff_note", "cyp_quote", "tags", "highlight"}
+        allowed = {"title", "staff_note", "cyp_quote", "tags", "highlight", "redactions"}
         for event in session["events"]:
             if event.get("index") == event_index:
                 for key, value in changes.items():

@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from .exporter import SessionExporter
+from .redaction import redact_event_screenshot
 from .recorder import Recorder
 from .storage import SessionStore
 
@@ -56,6 +57,18 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
                     session_id = unquote(path.split("/")[-2])
                     output = SessionExporter(root).export(session_id)
                     self._json({"html": str(output["html"]), "pdf": str(output["pdf"])})
+                elif path.startswith("/api/sessions/") and path.endswith("/redact"):
+                    parts = path.split("/")
+                    session_id = unquote(parts[3])
+                    event_index = int(parts[5])
+                    result = redact_event_screenshot(
+                        store,
+                        session_id,
+                        event_index,
+                        rect=payload.get("rect"),
+                        preset=payload.get("preset") or "top_strip",
+                    )
+                    self._json(result)
                 else:
                     self.send_error(404)
             except Exception as exc:
@@ -104,6 +117,8 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
             if length == 0:
                 return {}
             raw = self.rfile.read(length).decode("utf-8")
+            if not raw.strip():
+                return {}
             return json.loads(raw)
 
         def _json(self, payload: dict[str, Any], status: int = 200) -> None:

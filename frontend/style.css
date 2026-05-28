@@ -228,6 +228,12 @@ textarea {
   margin-top: 18px;
 }
 
+.redaction-count {
+  color: var(--accent);
+  font-weight: 700;
+  margin: 8px 0 0;
+}
+
 @media (max-width: 820px) {
   body {
     grid-template-columns: 1fr;
