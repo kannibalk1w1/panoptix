@@ -283,8 +283,20 @@ async function deleteSession(sessionId) {
 async function renderSettings() {
   title.textContent = "Settings";
   const data = await api.get("/api/settings");
+  const storageData = await api.get("/api/storage");
   const settings = data.settings;
+  const storage = storageData.storage;
+  const warningClass = storage.warning ? "storage-warning active-warning" : "storage-warning";
+  const warningText = storage.warning
+    ? `Storage is above the ${storage.warning_mb} MB warning threshold.`
+    : `Storage is below the ${storage.warning_mb} MB warning threshold.`;
   app.innerHTML = `
+    <section class="card ${warningClass}">
+      <h2>Local Storage</h2>
+      <p><strong>${escapeHtml(storage.total_mb)} MB</strong> across ${escapeHtml(storage.session_count)} session${storage.session_count === 1 ? "" : "s"}.</p>
+      <p class="muted">${escapeHtml(warningText)}</p>
+      <p class="muted">${escapeHtml(storage.root)}</p>
+    </section>
     <form class="card form" id="settings-form">
       <h2>Settings</h2>
       <label>Observation screenshot interval seconds <input name="observation_interval_seconds" type="number" min="5" value="${escapeAttr(settings.observation_interval_seconds)}"></label>

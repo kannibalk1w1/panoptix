@@ -12,6 +12,7 @@ from .redaction import redact_event_screenshot
 from .recorder import Recorder
 from .settings import SettingsStore
 from .storage import SessionStore
+from .storage_usage import get_storage_usage
 
 
 def create_handler(root: Path, store: SessionStore, recorder: Recorder):
@@ -27,6 +28,9 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
                     self._json(recorder.status())
                 elif path == "/api/settings":
                     self._json({"settings": settings_store.load()})
+                elif path == "/api/storage":
+                    settings = settings_store.load()
+                    self._json({"storage": get_storage_usage(root, settings["storage_warning_mb"])})
                 elif path == "/api/sessions":
                     self._json({"sessions": store.list_sessions()})
                 elif path.startswith("/api/sessions/") and "/screenshots/" in path:
