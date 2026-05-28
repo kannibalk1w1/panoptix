@@ -180,6 +180,13 @@ textarea {
   padding: 12px 0;
 }
 
+.row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .muted {
   color: var(--muted);
 }

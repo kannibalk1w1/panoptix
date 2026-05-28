@@ -101,6 +101,27 @@ class ApiEventUpdateTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
+    def test_delete_session_removes_session_directory(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SessionStore(root)
+            session = store.create_session("evidence", {}, {})
+            handler = create_handler(root, store, Recorder(store, PlaceholderCapture()))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base_url = f"http://127.0.0.1:{server.server_address[1]}"
+            try:
+                request = Request(f"{base_url}/api/sessions/{session['id']}", method="DELETE")
+                with urlopen(request, timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                self.assertTrue(payload["ok"])
+                self.assertFalse((root / "sessions" / session["id"]).exists())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
     @staticmethod
     def patch_json(url: str, payload: dict) -> dict:
         data = json.dumps(payload).encode("utf-8")

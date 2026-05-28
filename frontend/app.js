@@ -154,7 +154,10 @@ async function renderSessions() {
         <strong>${escapeHtml(session.title)}</strong>
         <div class="muted">${session.mode} - ${session.started} - ${session.event_count} screenshots</div>
       </div>
-      <button class="secondary" data-open="${session.id}">Review</button>
+      <div class="row-actions">
+        <button class="secondary" data-open="${session.id}">Review</button>
+        <button class="danger" data-delete-session="${session.id}">Delete</button>
+      </div>
     </div>
   `).join("");
   app.innerHTML = `<section class="card">${rows || "<p class='muted'>No sessions yet.</p>"}</section>`;
@@ -162,6 +165,9 @@ async function renderSessions() {
     button.addEventListener("click", async () => {
       await renderReview(button.dataset.open);
     });
+  });
+  app.querySelectorAll("[data-delete-session]").forEach((button) => {
+    button.addEventListener("click", async () => deleteSession(button.dataset.deleteSession));
   });
 }
 
@@ -247,6 +253,14 @@ async function deleteEvent(sessionId, eventIndex) {
   }
   await api.delete(`/api/sessions/${sessionId}/events/${eventIndex}`);
   await renderReview(sessionId);
+}
+
+async function deleteSession(sessionId) {
+  if (!confirm("Delete this session and its local screenshots? This cannot be undone.")) {
+    return;
+  }
+  await api.delete(`/api/sessions/${sessionId}`);
+  await renderSessions();
 }
 
 function renderSettings() {
