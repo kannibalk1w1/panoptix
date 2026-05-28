@@ -296,6 +296,9 @@ async function renderSettings() {
       <p><strong>${escapeHtml(storage.total_mb)} MB</strong> across ${escapeHtml(storage.session_count)} session${storage.session_count === 1 ? "" : "s"}.</p>
       <p class="muted">${escapeHtml(warningText)}</p>
       <p class="muted">${escapeHtml(storage.root)}</p>
+      <div class="actions">
+        <button class="danger" id="cleanup-retention">Delete sessions older than retention period</button>
+      </div>
     </section>
     <form class="card form" id="settings-form">
       <h2>Settings</h2>
@@ -324,6 +327,14 @@ async function renderSettings() {
       storage_warning_mb: Number(form.get("storage_warning_mb")),
       default_evidence_purpose: form.get("default_evidence_purpose"),
     });
+    await renderSettings();
+  });
+  app.querySelector("#cleanup-retention").addEventListener("click", async () => {
+    if (!confirm(`Delete sessions older than ${settings.retention_days} days? This removes local screenshots and exports.`)) {
+      return;
+    }
+    const result = await api.post("/api/retention/cleanup", {});
+    alert(`Deleted ${result.deleted.length} old session${result.deleted.length === 1 ? "" : "s"}.`);
     await renderSettings();
   });
 }

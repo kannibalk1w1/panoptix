@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlparse
 from .exporter import SessionExporter
 from .redaction import redact_event_screenshot
 from .recorder import Recorder
+from .retention import cleanup_old_sessions
 from .settings import SettingsStore
 from .storage import SessionStore
 from .storage_usage import get_storage_usage
@@ -77,6 +78,9 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
                         preset=payload.get("preset") or "top_strip",
                     )
                     self._json(result)
+                elif path == "/api/retention/cleanup":
+                    settings = settings_store.load()
+                    self._json(cleanup_old_sessions(store, settings["retention_days"]))
                 else:
                     self.send_error(404)
             except Exception as exc:

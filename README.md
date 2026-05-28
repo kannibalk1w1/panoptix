@@ -24,6 +24,7 @@ http://127.0.0.1:8765
 - Formal PDF export.
 - Persistent settings for observation interval, retention days, storage warning, and default evidence purpose.
 - Local storage usage display and warning threshold.
+- Retention cleanup for deleting sessions older than the configured retention period.
 - Vanilla dashboard served locally.
 
 Evidence Capture starts a global mouse hook when `pynput` is installed. If dependencies are missing, the dashboard stays usable and reports manual fallback mode.
