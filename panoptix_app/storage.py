@@ -95,6 +95,17 @@ class SessionStore:
                 return session
         raise KeyError(f"Event not found: {event_index}")
 
+    def delete_event(self, session_id: str, event_index: int) -> dict[str, Any]:
+        session = self.load_session(session_id)
+        original_count = len(session["events"])
+        session["events"] = [event for event in session["events"] if event.get("index") != event_index]
+        if len(session["events"]) == original_count:
+            raise KeyError(f"Event not found: {event_index}")
+        for index, event in enumerate(session["events"], start=1):
+            event["index"] = index
+        self._write_session(session)
+        return session
+
     def stop_session(self, session_id: str) -> dict[str, Any]:
         session = self.load_session(session_id)
         session["stopped"] = now_iso()

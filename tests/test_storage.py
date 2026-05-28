@@ -91,6 +91,19 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(event["tags"], ["project progress", "independent work"])
             self.assertTrue(event["highlight"])
 
+    def test_delete_event_removes_event_and_reindexes_remaining(self):
+        with TemporaryDirectory() as tmp:
+            store = SessionStore(Path(tmp))
+            session = store.create_session("evidence", {}, {})
+            store.add_event(session["id"], {"type": "click", "timestamp": "one", "screenshot": "001.png"})
+            store.add_event(session["id"], {"type": "click", "timestamp": "two", "screenshot": "002.png"})
+
+            updated = store.delete_event(session["id"], 1)
+
+            self.assertEqual(len(updated["events"]), 1)
+            self.assertEqual(updated["events"][0]["index"], 1)
+            self.assertEqual(updated["events"][0]["timestamp"], "two")
+
 
 if __name__ == "__main__":
     unittest.main()

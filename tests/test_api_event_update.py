@@ -80,6 +80,27 @@ class ApiEventUpdateTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
+    def test_delete_event_removes_event(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SessionStore(root)
+            session = store.create_session("evidence", {}, {})
+            store.add_event(session["id"], {"type": "click", "timestamp": "one", "screenshot": "001.png"})
+            handler = create_handler(root, store, Recorder(store, PlaceholderCapture()))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base_url = f"http://127.0.0.1:{server.server_address[1]}"
+            try:
+                request = Request(f"{base_url}/api/sessions/{session['id']}/events/1", method="DELETE")
+                with urlopen(request, timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(payload["session"]["events"], [])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
     @staticmethod
     def patch_json(url: str, payload: dict) -> dict:
         data = json.dumps(payload).encode("utf-8")

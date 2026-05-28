@@ -82,7 +82,12 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
         def do_DELETE(self) -> None:
             path = urlparse(self.path).path
             try:
-                if path.startswith("/api/sessions/"):
+                if path.startswith("/api/sessions/") and "/events/" in path:
+                    parts = path.split("/")
+                    session_id = unquote(parts[3])
+                    event_index = int(parts[5])
+                    self._json({"session": store.delete_event(session_id, event_index)})
+                elif path.startswith("/api/sessions/"):
                     session_id = unquote(path.removeprefix("/api/sessions/"))
                     store.delete_session(session_id)
                     self._json({"ok": True})

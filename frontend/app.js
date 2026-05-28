@@ -25,6 +25,10 @@ const api = {
     });
     return response.json();
   },
+  async delete(path) {
+    const response = await fetch(path, { method: "DELETE" });
+    return response.json();
+  },
 };
 
 document.querySelectorAll(".sidebar button").forEach((button) => {
@@ -190,6 +194,9 @@ async function renderReview(sessionId) {
   app.querySelectorAll("[data-save-event]").forEach((button) => {
     button.addEventListener("click", async () => saveEvent(sessionId, button.dataset.saveEvent));
   });
+  app.querySelectorAll("[data-delete-event]").forEach((button) => {
+    button.addEventListener("click", async () => deleteEvent(sessionId, button.dataset.deleteEvent));
+  });
 }
 
 function renderEventEditor(sessionId, event) {
@@ -210,6 +217,7 @@ function renderEventEditor(sessionId, event) {
         <label class="check-row"><input type="checkbox" data-field="highlight" data-event="${event.index}" ${checked}> Mark as highlight</label>
         <div class="actions">
           <button class="primary" data-save-event="${event.index}">Save evidence note</button>
+          <button class="danger" data-delete-event="${event.index}">Remove from report</button>
         </div>
       </div>
     </article>
@@ -230,6 +238,14 @@ async function saveEvent(sessionId, eventIndex) {
     }
   });
   await api.patch(`/api/sessions/${sessionId}/events/${eventIndex}`, payload);
+  await renderReview(sessionId);
+}
+
+async function deleteEvent(sessionId, eventIndex) {
+  if (!confirm("Remove this screenshot from the report? The original image file stays in local storage for now.")) {
+    return;
+  }
+  await api.delete(`/api/sessions/${sessionId}/events/${eventIndex}`);
   await renderReview(sessionId);
 }
 
