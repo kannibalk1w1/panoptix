@@ -23,6 +23,8 @@ class HtmlExporter:
     def _render(self, session: dict) -> str:
         metadata = session.get("metadata", {})
         title = metadata.get("activity") or "Panoptix Evidence Report"
+        highlights = [event for event in session.get("events", []) if event.get("highlight")]
+        highlight_cards = "\n".join(self._render_event(session, event) for event in highlights)
         cards = "\n".join(self._render_event(session, event) for event in session.get("events", []))
         metadata_rows = "\n".join(
             f"<dt>{html.escape(str(key).replace('_', ' ').title())}</dt><dd>{html.escape(str(value))}</dd>"
@@ -57,6 +59,7 @@ class HtmlExporter:
       <h2>Session Metadata</h2>
       <dl>{metadata_rows}</dl>
     </section>
+    {self._render_highlight_section(highlight_cards)}
     <section>
       <h2>Evidence</h2>
       {cards}
@@ -65,6 +68,15 @@ class HtmlExporter:
 </body>
 </html>
 """
+
+    @staticmethod
+    def _render_highlight_section(highlight_cards: str) -> str:
+        if not highlight_cards:
+            return ""
+        return f"""<section>
+      <h2>Marked Highlights</h2>
+      {highlight_cards}
+    </section>"""
 
     def _render_event(self, session: dict, event: dict) -> str:
         image_src = self._image_data_url(session["id"], event["screenshot"])
@@ -107,10 +119,14 @@ class PdfExporter:
         title = metadata.get("activity") or "Panoptix Evidence Report"
 
         pdf = FPDF(unit="mm", format="A4")
+        pdf.set_compression(False)
         pdf.set_auto_page_break(auto=True, margin=14)
         self._add_summary_page(pdf, session, title)
-        for event in session.get("events", []):
-            self._add_event_page(pdf, session, event, title)
+        if session.get("mode") == "observation":
+            self._add_observation_pages(pdf, session)
+        else:
+            for event in session.get("events", []):
+                self._add_event_page(pdf, session, event, title)
         pdf.output(str(output))
         return output
 
@@ -168,6 +184,63 @@ class PdfExporter:
             pdf.set_font("Helvetica", "B", 10)
             pdf.cell(0, 6, "Marked as highlight")
             pdf.ln(6)
+
+    def _add_observation_pages(self, pdf, session: dict) -> None:
+        highlighted = [event for event in session.get("events", []) if event.get("highlight")]
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 10, "Highlights")
+        pdf.ln(10)
+        pdf.set_font("Helvetica", "", 11)
+        if not highlighted:
+            pdf.multi_cell(pdf.w - pdf.l_margin - pdf.r_margin, 7, "No screenshots were marked as highlights.")
+        else:
+            for event in highlighted:
+                self._add_contact_sheet_item(pdf, session, event, include_note=True)
+
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 10, "Observation Timeline")
+        pdf.ln(10)
+        pdf.set_font("Helvetica", "", 10)
+        for event in session.get("events", []):
+            if pdf.get_y() > 250:
+                pdf.add_page()
+                pdf.set_font("Helvetica", "B", 16)
+                pdf.cell(0, 10, "Observation Timeline")
+                pdf.ln(10)
+                pdf.set_font("Helvetica", "", 10)
+            self._add_contact_sheet_item(pdf, session, event, include_note=False)
+
+    def _add_contact_sheet_item(self, pdf, session: dict, event: dict, include_note: bool) -> None:
+        x = pdf.get_x()
+        y = pdf.get_y()
+        image_path = self.root / "sessions" / session["id"] / "screenshots" / event["screenshot"]
+        if image_path.exists():
+            self._add_thumbnail(pdf, image_path, x, y)
+        pdf.set_xy(x + 48, y)
+        title = event.get("title") or event.get("type", "Screenshot").title()
+        marker = " [highlight]" if event.get("highlight") else ""
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.multi_cell(130, 5, self._clean(f"{event.get('index', '')}. {title}{marker}"))
+        pdf.set_x(x + 48)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.multi_cell(130, 5, self._clean(event.get("timestamp", "")))
+        if include_note and event.get("staff_note"):
+            pdf.set_x(x + 48)
+            pdf.multi_cell(130, 5, self._clean(str(event["staff_note"])))
+        pdf.set_y(max(pdf.get_y(), y + 34))
+        pdf.ln(3)
+
+    @staticmethod
+    def _add_thumbnail(pdf, image_path: Path, x: float, y: float) -> None:
+        try:
+            pdf.image(str(image_path), x=x, y=y, w=42, h=30)
+        except Exception:
+            pdf.set_xy(x, y)
+            pdf.set_font("Helvetica", "I", 8)
+            pdf.multi_cell(42, 5, f"Image unavailable: {image_path.name}")
+            pdf.set_xy(x, y)
 
     @staticmethod
     def _add_image(pdf, image_path: Path) -> None:

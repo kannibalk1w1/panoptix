@@ -81,6 +81,38 @@ class HtmlExporterTests(unittest.TestCase):
             self.assertTrue(output["pdf"].exists())
             self.assertGreater(output["pdf"].stat().st_size, 500)
 
+    def test_observation_pdf_uses_contact_sheet_layout(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SessionStore(root)
+            session = store.create_session(
+                "observation",
+                {"cyp": "AB", "activity": "Long observation", "staff": "KS"},
+                {},
+            )
+            screenshot_dir = root / "sessions" / session["id"] / "screenshots"
+            for index in range(1, 8):
+                screenshot = PlaceholderCapture().capture(screenshot_dir, f"{index:03d}.png")
+                store.add_event(
+                    session["id"],
+                    {
+                        "type": "periodic",
+                        "timestamp": f"2026-05-28T10:0{index}:00",
+                        "screenshot": screenshot.name,
+                        "title": f"Observation {index}",
+                        "staff_note": "",
+                        "highlight": index in (2, 5),
+                    },
+                )
+
+            output = SessionExporter(root).export(session["id"])
+            pdf_text = output["pdf"].read_bytes().decode("latin-1", errors="ignore")
+            html = output["html"].read_text(encoding="utf-8")
+
+            self.assertIn("Observation Timeline", pdf_text)
+            self.assertIn("Highlights", pdf_text)
+            self.assertIn("Marked Highlights", html)
+
 
 if __name__ == "__main__":
     unittest.main()
