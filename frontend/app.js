@@ -83,10 +83,12 @@ function renderHome() {
   });
 }
 
-function renderStartForm(mode, heading) {
+async function renderStartForm(mode, heading) {
+  const settingsData = await api.get("/api/settings");
+  const defaults = settingsData.settings;
   title.textContent = heading;
   const interval = mode === "observation"
-    ? `<label>Screenshot interval seconds <input name="interval_seconds" type="number" min="5" value="60"></label>`
+    ? `<label>Screenshot interval seconds <input name="interval_seconds" type="number" min="5" value="${escapeAttr(defaults.observation_interval_seconds)}"></label>`
     : "";
   app.innerHTML = `
     <form class="form" id="start-form">
@@ -95,10 +97,10 @@ function renderStartForm(mode, heading) {
       <label>Staff member <input name="staff" autocomplete="off"></label>
       <label>Evidence purpose
         <select name="purpose">
-          <option>UAS evidence</option>
-          <option>Behaviour support</option>
-          <option>Project progress</option>
-          <option>General observation</option>
+          ${renderPurposeOption("UAS evidence", defaults.default_evidence_purpose)}
+          ${renderPurposeOption("Behaviour support", defaults.default_evidence_purpose)}
+          ${renderPurposeOption("Project progress", defaults.default_evidence_purpose)}
+          ${renderPurposeOption("General observation", defaults.default_evidence_purpose)}
         </select>
       </label>
       <label>Privacy note <textarea name="privacy_note"></textarea></label>
@@ -278,14 +280,40 @@ async function deleteSession(sessionId) {
   await renderSessions();
 }
 
-function renderSettings() {
+async function renderSettings() {
   title.textContent = "Settings";
+  const data = await api.get("/api/settings");
+  const settings = data.settings;
   app.innerHTML = `
-    <section class="card">
+    <form class="card form" id="settings-form">
       <h2>Settings</h2>
-      <p class="muted">Storage, hotkeys, retention, and redaction defaults will live here next.</p>
-    </section>
+      <label>Observation screenshot interval seconds <input name="observation_interval_seconds" type="number" min="5" value="${escapeAttr(settings.observation_interval_seconds)}"></label>
+      <label>Retention days <input name="retention_days" type="number" min="1" value="${escapeAttr(settings.retention_days)}"></label>
+      <label>Storage warning MB <input name="storage_warning_mb" type="number" min="1" value="${escapeAttr(settings.storage_warning_mb)}"></label>
+      <label>Default evidence purpose
+        <select name="default_evidence_purpose">
+          ${renderPurposeOption("UAS evidence", settings.default_evidence_purpose)}
+          ${renderPurposeOption("Behaviour support", settings.default_evidence_purpose)}
+          ${renderPurposeOption("Project progress", settings.default_evidence_purpose)}
+          ${renderPurposeOption("General observation", settings.default_evidence_purpose)}
+        </select>
+      </label>
+      <div class="actions">
+        <button class="primary" type="submit">Save settings</button>
+      </div>
+    </form>
   `;
+  app.querySelector("#settings-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await api.patch("/api/settings", {
+      observation_interval_seconds: Number(form.get("observation_interval_seconds")),
+      retention_days: Number(form.get("retention_days")),
+      storage_warning_mb: Number(form.get("storage_warning_mb")),
+      default_evidence_purpose: form.get("default_evidence_purpose"),
+    });
+    await renderSettings();
+  });
 }
 
 function escapeHtml(value) {
@@ -300,6 +328,11 @@ function escapeHtml(value) {
 
 function escapeAttr(value) {
   return escapeHtml(value).replace(/`/g, "&#096;");
+}
+
+function renderPurposeOption(value, selectedValue) {
+  const selected = value === selectedValue ? "selected" : "";
+  return `<option ${selected}>${escapeHtml(value)}</option>`;
 }
 
 render(currentView);

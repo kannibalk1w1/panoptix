@@ -10,12 +10,14 @@ from urllib.parse import unquote, urlparse
 from .exporter import SessionExporter
 from .redaction import redact_event_screenshot
 from .recorder import Recorder
+from .settings import SettingsStore
 from .storage import SessionStore
 
 
 def create_handler(root: Path, store: SessionStore, recorder: Recorder):
     root = Path(root)
     frontend_dir = root.parent / "frontend"
+    settings_store = SettingsStore(root)
 
     class PanoptixHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -23,6 +25,8 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
             try:
                 if path == "/api/status":
                     self._json(recorder.status())
+                elif path == "/api/settings":
+                    self._json({"settings": settings_store.load()})
                 elif path == "/api/sessions":
                     self._json({"sessions": store.list_sessions()})
                 elif path.startswith("/api/sessions/") and "/screenshots/" in path:
@@ -77,7 +81,9 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
         def do_PATCH(self) -> None:
             path = urlparse(self.path).path
             try:
-                if path.startswith("/api/sessions/") and "/events/" in path:
+                if path == "/api/settings":
+                    self._json({"settings": settings_store.update(self._payload())})
+                elif path.startswith("/api/sessions/") and "/events/" in path:
                     parts = path.split("/")
                     session_id = unquote(parts[3])
                     event_index = int(parts[5])
