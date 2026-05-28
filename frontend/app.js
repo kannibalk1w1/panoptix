@@ -264,6 +264,9 @@ async function renderReview(sessionId) {
   app.querySelectorAll("[data-redact-top]").forEach((button) => {
     button.addEventListener("click", async () => redactTopStrip(sessionId, button.dataset.redactTop));
   });
+  app.querySelectorAll("[data-restore-original]").forEach((button) => {
+    button.addEventListener("click", async () => restoreOriginal(sessionId, button.dataset.restoreOriginal));
+  });
   app.querySelectorAll("[data-review-filter]").forEach((button) => {
     button.addEventListener("click", async () => {
       reviewFilter = button.dataset.reviewFilter;
@@ -278,6 +281,7 @@ function renderEventEditor(sessionId, event) {
   const imageUrl = `/api/sessions/${encodeURIComponent(sessionId)}/screenshots/${encodeURIComponent(event.screenshot || "")}`;
   const redactionCount = Array.isArray(event.redactions) ? event.redactions.length : 0;
   const redactionLabel = redactionCount ? `<p class="redaction-count">${redactionCount} redaction${redactionCount === 1 ? "" : "s"} applied</p>` : "";
+  const restoreButton = redactionCount ? `<button class="secondary" data-restore-original="${event.index}">Undo redactions</button>` : "";
   return `
     <article class="card event-editor">
       <div>
@@ -294,6 +298,7 @@ function renderEventEditor(sessionId, event) {
         <div class="actions">
           <button class="primary" data-save-event="${event.index}">Save evidence note</button>
           <button class="secondary" data-redact-top="${event.index}">Redact top strip</button>
+          ${restoreButton}
           <button class="danger" data-delete-event="${event.index}">Remove from report</button>
         </div>
       </div>
@@ -331,6 +336,14 @@ async function redactTopStrip(sessionId, eventIndex) {
     return;
   }
   await api.post(`/api/sessions/${sessionId}/events/${eventIndex}/redact`, { preset: "top_strip" });
+  await renderReview(sessionId);
+}
+
+async function restoreOriginal(sessionId, eventIndex) {
+  if (!confirm("Undo all redactions on this screenshot by restoring the locally saved original?")) {
+    return;
+  }
+  await api.post(`/api/sessions/${sessionId}/events/${eventIndex}/restore-original`, {});
   await renderReview(sessionId);
 }
 

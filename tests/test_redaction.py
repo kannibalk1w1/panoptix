@@ -15,7 +15,7 @@ from PIL import Image
 
 from panoptix_app.capture import PlaceholderCapture
 from panoptix_app.recorder import Recorder
-from panoptix_app.redaction import redact_event_screenshot
+from panoptix_app.redaction import redact_event_screenshot, restore_original_screenshot
 from panoptix_app.server import create_handler
 from panoptix_app.storage import SessionStore
 
@@ -64,6 +64,23 @@ class RedactionTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
+
+    def test_restore_original_screenshot_removes_redactions(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SessionStore(root)
+            session = store.create_session("evidence", {}, {})
+            screenshot_dir = store.screenshot_dir(session["id"])
+            image_path = screenshot_dir / "001.png"
+            Image.new("RGB", (20, 20), "white").save(image_path)
+            store.add_event(session["id"], {"type": "click", "timestamp": "now", "screenshot": "001.png"})
+            redact_event_screenshot(root, session["id"], 1, {"x": 0, "y": 0, "width": 20, "height": 20})
+
+            result = restore_original_screenshot(root, session["id"], 1)
+
+            with Image.open(image_path) as image:
+                self.assertEqual(image.getpixel((10, 10)), (255, 255, 255))
+            self.assertEqual(result["event"].get("redactions"), [])
 
     @staticmethod
     def post_json(url: str, payload: dict) -> dict:

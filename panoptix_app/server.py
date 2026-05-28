@@ -9,7 +9,7 @@ from urllib.parse import unquote, urlparse
 
 from .app_paths import get_project_root
 from .exporter import SessionExporter
-from .redaction import redact_event_screenshot
+from .redaction import redact_event_screenshot, restore_original_screenshot
 from .recorder import Recorder
 from .retention import cleanup_old_sessions
 from .settings import SettingsStore
@@ -79,6 +79,11 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
                         preset=payload.get("preset") or "top_strip",
                     )
                     self._json(result)
+                elif path.startswith("/api/sessions/") and path.endswith("/restore-original"):
+                    parts = path.split("/")
+                    session_id = unquote(parts[3])
+                    event_index = int(parts[5])
+                    self._json(restore_original_screenshot(store, session_id, event_index))
                 elif path == "/api/retention/cleanup":
                     settings = settings_store.load()
                     self._json(cleanup_old_sessions(store, settings["retention_days"]))

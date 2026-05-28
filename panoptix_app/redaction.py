@@ -65,3 +65,19 @@ def _resolve_box(size: tuple[int, int], rect: dict[str, int] | None, preset: str
     redaction_width = max(1, int(rect["width"]))
     redaction_height = max(1, int(rect["height"]))
     return (x, y, min(width, x + redaction_width), min(height, y + redaction_height))
+
+
+def restore_original_screenshot(root: Path | SessionStore, session_id: str, event_index: int) -> dict[str, Any]:
+    store = root if isinstance(root, SessionStore) else SessionStore(Path(root))
+    session = store.load_session(session_id)
+    event = next((item for item in session["events"] if item.get("index") == event_index), None)
+    if event is None:
+        raise KeyError(f"Event not found: {event_index}")
+    screenshot_dir = store.screenshot_dir(session_id)
+    image_path = screenshot_dir / event["screenshot"]
+    backup_path = screenshot_dir / "originals" / event["screenshot"]
+    if not backup_path.exists():
+        raise FileNotFoundError(backup_path)
+    shutil.copy2(backup_path, image_path)
+    session = store.update_event(session_id, event_index, {"redactions": []})
+    return {"session": session, "event": next(item for item in session["events"] if item.get("index") == event_index)}
