@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+import json
+import mimetypes
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+from urllib.parse import unquote, urlparse
+
+from .exporter import HtmlExporter
+from .recorder import Recorder
+from .storage import SessionStore
+
+
+def create_handler(root: Path, store: SessionStore, recorder: Recorder):
+    root = Path(root)
+    frontend_dir = root.parent / "frontend"
+
+    class PanoptixHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            path = urlparse(self.path).path
+            try:
+                if path == "/api/status":
+                    self._json(recorder.status())
+                elif path == "/api/sessions":
+                    self._json({"sessions": store.list_sessions()})
+                elif path.startswith("/api/sessions/"):
+                    session_id = unquote(path.removeprefix("/api/sessions/"))
+                    self._json({"session": store.load_session(session_id)})
+                else:
+                    self._static(path)
+            except Exception as exc:
+                self._error(exc)
+
+        def do_POST(self) -> None:
+            path = urlparse(self.path).path
+            try:
+                payload = self._payload()
+                if path == "/api/record/start":
+                    session = recorder.start(
+                        payload.get("mode", "evidence"),
+                        payload.get("metadata", {}),
+                        payload.get("settings", {}),
+                    )
+                    self._json({"session": session})
+                elif path == "/api/record/stop":
+                    self._json({"session": recorder.stop()})
+                elif path == "/api/capture/click":
+                    event = recorder.capture_click(int(payload["x"]), int(payload["y"]))
+                    self._json({"event": event})
+                elif path == "/api/capture/periodic":
+                    self._json({"event": recorder.capture_periodic()})
+                elif path.startswith("/api/sessions/") and path.endswith("/export"):
+                    session_id = unquote(path.split("/")[-2])
+                    output = HtmlExporter(root).export(session_id)
+                    self._json({"html": str(output)})
+                else:
+                    self.send_error(404)
+            except Exception as exc:
+                self._error(exc)
+
+        def do_PATCH(self) -> None:
+            path = urlparse(self.path).path
+            try:
+                if path.startswith("/api/sessions/"):
+                    session_id = unquote(path.removeprefix("/api/sessions/"))
+                    self._json({"session": store.update_session(session_id, self._payload())})
+                else:
+                    self.send_error(404)
+            except Exception as exc:
+                self._error(exc)
+
+        def do_DELETE(self) -> None:
+            path = urlparse(self.path).path
+            try:
+                if path.startswith("/api/sessions/"):
+                    session_id = unquote(path.removeprefix("/api/sessions/"))
+                    store.delete_session(session_id)
+                    self._json({"ok": True})
+                else:
+                    self.send_error(404)
+            except Exception as exc:
+                self._error(exc)
+
+        def log_message(self, format: str, *args: Any) -> None:
+            return
+
+        def _payload(self) -> dict[str, Any]:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length == 0:
+                return {}
+            raw = self.rfile.read(length).decode("utf-8")
+            return json.loads(raw)
+
+        def _json(self, payload: dict[str, Any], status: int = 200) -> None:
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _error(self, exc: Exception) -> None:
+            self._json({"error": str(exc)}, status=400)
+
+        def _static(self, path: str) -> None:
+            relative = "index.html" if path in ("", "/") else path.lstrip("/")
+            target = (frontend_dir / relative).resolve()
+            if not str(target).startswith(str(frontend_dir.resolve())) or not target.exists():
+                self.send_error(404)
+                return
+            body = target.read_bytes()
+            mime = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    return PanoptixHandler
+
+
+def run_server(root: Path, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
+    store = SessionStore(root)
+    recorder = Recorder(store)
+    handler = create_handler(root, store, recorder)
+    server = ThreadingHTTPServer((host, port), handler)
+    print(f"Panoptix running at http://{host}:{server.server_address[1]}")
+    server.serve_forever()
+    return server

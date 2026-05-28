@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panoptix</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">Panoptix</div>
+    <button data-view="home">Home</button>
+    <button data-view="evidence">Evidence Capture</button>
+    <button data-view="observation">Observation Mode</button>
+    <button data-view="sessions">Sessions</button>
+    <button data-view="settings">Settings</button>
+  </aside>
+  <main>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Local AP evidence capture</p>
+        <h1 id="page-title">Home</h1>
+      </div>
+      <div id="status" class="status">Idle</div>
+    </header>
+    <section id="app" class="content"></section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

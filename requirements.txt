@@ -1,0 +1,4 @@
+mss
+Pillow
+pynput
+fpdf2
