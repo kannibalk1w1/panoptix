@@ -20,6 +20,7 @@ class Recorder:
         self.started_at: datetime | None = None
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._pause_event = threading.Event()
         self._observation_thread: threading.Thread | None = None
         self._mouse_hook: Any | None = None
         self.hook_error: str | None = None
@@ -41,6 +42,7 @@ class Recorder:
             "hook_error": self.hook_error,
             "elapsed_seconds": elapsed_seconds,
             "event_count": event_count,
+            "paused": self._pause_event.is_set(),
         }
 
     def start(
@@ -58,6 +60,7 @@ class Recorder:
             self.started_at = datetime.now()
             self.hook_error = None
             self._stop_event.clear()
+            self._pause_event.clear()
             if mode == "observation":
                 interval = float((settings or {}).get("interval_seconds", 60))
                 self._observation_thread = threading.Thread(
@@ -90,7 +93,15 @@ class Recorder:
             self.active_session_id = None
             self.active_mode = None
             self.started_at = None
+            self._pause_event.clear()
             return session
+
+    def pause(self) -> None:
+        if self.active_session_id is not None:
+            self._pause_event.set()
+
+    def resume(self) -> None:
+        self._pause_event.clear()
 
     def capture_click(self, x: int, y: int) -> dict[str, Any]:
         with self._lock:
@@ -135,6 +146,8 @@ class Recorder:
 
     def _observation_loop(self, interval: float) -> None:
         while not self._stop_event.wait(interval):
+            if self._pause_event.is_set():
+                continue
             try:
                 self.capture_periodic()
             except RuntimeError:

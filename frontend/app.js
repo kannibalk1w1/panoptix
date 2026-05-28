@@ -70,6 +70,7 @@ async function render(view) {
     await renderSettings();
   }
   bindBannerStop();
+  bindPauseResume();
 }
 
 function renderHome() {
@@ -160,6 +161,8 @@ async function renderStartForm(mode, heading) {
     await api.post("/api/capture/periodic");
     await refreshStatus();
   });
+  bindBannerStop();
+  bindPauseResume();
 }
 
 async function renderSessions() {
@@ -199,6 +202,17 @@ function bindBannerStop() {
   });
 }
 
+function bindPauseResume() {
+  const button = app.querySelector("#banner-pause");
+  if (!button) {
+    return;
+  }
+  button.addEventListener("click", async () => {
+    await api.post(latestStatus.paused ? "/api/record/resume" : "/api/record/pause");
+    await render(currentView);
+  });
+}
+
 function renderActiveBanner() {
   if (!latestStatus.active) {
     return "";
@@ -206,14 +220,21 @@ function renderActiveBanner() {
   const mode = latestStatus.mode === "observation" ? "Observation Mode" : "Evidence Capture";
   const elapsed = formatElapsed(latestStatus.elapsed_seconds || 0);
   const fallback = latestStatus.hook_error ? `<p class="muted">${escapeHtml(latestStatus.hook_error)}</p>` : "";
+  const paused = latestStatus.paused ? "Paused" : "Active";
+  const pauseButton = latestStatus.mode === "observation"
+    ? `<button class="secondary" id="banner-pause">${latestStatus.paused ? "Resume" : "Pause"}</button>`
+    : "";
   return `
     <section class="active-banner">
       <div>
-        <h2>${escapeHtml(mode)} Active</h2>
+        <h2>${escapeHtml(mode)} ${escapeHtml(paused)}</h2>
         <p>${escapeHtml(elapsed)} elapsed - ${escapeHtml(latestStatus.event_count || 0)} screenshots captured</p>
         ${fallback}
       </div>
-      <button class="danger" id="banner-stop">Stop recording</button>
+      <div class="row-actions">
+        ${pauseButton}
+        <button class="danger" id="banner-stop">Stop recording</button>
+      </div>
     </section>
   `;
 }

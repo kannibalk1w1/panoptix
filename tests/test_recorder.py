@@ -76,6 +76,25 @@ class RecorderTests(unittest.TestCase):
             self.assertGreaterEqual(len(loaded["events"]), 2)
             self.assertTrue(all(event["type"] == "periodic" for event in loaded["events"]))
 
+    def test_observation_pause_stops_interval_capture_until_resumed(self):
+        with TemporaryDirectory() as tmp:
+            store = SessionStore(Path(tmp))
+            recorder = Recorder(store, PlaceholderCapture())
+            session = recorder.start("observation", {}, {"interval_seconds": 0.05})
+
+            time.sleep(0.08)
+            recorder.pause()
+            count_at_pause = len(store.load_session(session["id"])["events"])
+            time.sleep(0.14)
+            count_while_paused = len(store.load_session(session["id"])["events"])
+            recorder.resume()
+            time.sleep(0.08)
+            recorder.stop()
+
+            final_count = len(store.load_session(session["id"])["events"])
+            self.assertEqual(count_while_paused, count_at_pause)
+            self.assertGreater(final_count, count_while_paused)
+
 
 if __name__ == "__main__":
     unittest.main()

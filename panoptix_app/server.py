@@ -58,6 +58,12 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
                     self._json({"session": session})
                 elif path == "/api/record/stop":
                     self._json({"session": recorder.stop()})
+                elif path == "/api/record/pause":
+                    recorder.pause()
+                    self._json(recorder.status())
+                elif path == "/api/record/resume":
+                    recorder.resume()
+                    self._json(recorder.status())
                 elif path == "/api/capture/click":
                     event = recorder.capture_click(int(payload["x"]), int(payload["y"]))
                     self._json({"event": event})
