@@ -79,13 +79,23 @@ class SessionStore:
         session = self.load_session(session_id)
         event = dict(event)
         event["index"] = len(session["events"]) + 1
+        event.setdefault("selected_for_export", True)
         session["events"].append(event)
         self._write_session(session)
         return session
 
     def update_event(self, session_id: str, event_index: int, changes: dict[str, Any]) -> dict[str, Any]:
         session = self.load_session(session_id)
-        allowed = {"title", "staff_note", "cyp_quote", "tags", "highlight", "redactions"}
+        allowed = {
+            "title",
+            "staff_note",
+            "cyp_quote",
+            "tags",
+            "highlight",
+            "redactions",
+            "selected_for_export",
+            "marker",
+        }
         for event in session["events"]:
             if event.get("index") == event_index:
                 for key, value in changes.items():

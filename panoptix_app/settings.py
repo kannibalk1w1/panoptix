@@ -10,6 +10,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "retention_days": 30,
     "storage_warning_mb": 500,
     "default_evidence_purpose": "UAS evidence",
+    "marker_shape": "circle",
+    "marker_color": "#ef233c",
+    "marker_size": 32,
+    "marker_stroke": 3,
 }
 
 
@@ -35,6 +39,8 @@ class SettingsStore:
 
     @staticmethod
     def _coerce(key: str, value: Any) -> Any:
-        if key in {"observation_interval_seconds", "retention_days", "storage_warning_mb"}:
+        if key == "marker_size":
+            return max(6, int(value))
+        if key in {"observation_interval_seconds", "retention_days", "storage_warning_mb", "marker_size", "marker_stroke"}:
             return max(1, int(value))
         return str(value)

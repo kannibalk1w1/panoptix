@@ -47,6 +47,7 @@ class SessionStoreTests(unittest.TestCase):
 
             self.assertEqual(updated["events"][0]["index"], 1)
             self.assertEqual(updated["events"][0]["x"], 100)
+            self.assertTrue(updated["events"][0]["selected_for_export"])
 
     def test_list_sessions_returns_newest_first(self):
         with TemporaryDirectory() as tmp:
@@ -82,6 +83,7 @@ class SessionStoreTests(unittest.TestCase):
                     "staff_note": "Stayed focused on the task.",
                     "tags": ["project progress", "independent work"],
                     "highlight": True,
+                    "selected_for_export": False,
                 },
             )
 
@@ -90,6 +92,7 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(event["staff_note"], "Stayed focused on the task.")
             self.assertEqual(event["tags"], ["project progress", "independent work"])
             self.assertTrue(event["highlight"])
+            self.assertFalse(event["selected_for_export"])
 
     def test_delete_event_removes_event_and_reindexes_remaining(self):
         with TemporaryDirectory() as tmp:

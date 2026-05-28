@@ -137,7 +137,15 @@ async function renderStartForm(mode, heading) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const metadata = Object.fromEntries(["cyp", "activity", "staff", "purpose", "privacy_note"].map((key) => [key, form.get(key)]));
-    const settings = { interval_seconds: Number(form.get("interval_seconds") || 60) };
+    const settings = {
+      interval_seconds: Number(form.get("interval_seconds") || 60),
+      marker: {
+        shape: defaults.marker_shape,
+        color: defaults.marker_color,
+        size: defaults.marker_size,
+        stroke: defaults.marker_stroke,
+      },
+    };
     await api.post("/api/record/start", { mode, metadata, settings });
     const status = await refreshStatus();
     latestStatus = status;
@@ -260,12 +268,18 @@ async function renderReview(sessionId) {
       <p class="muted">${escapeHtml(session.mode)} - ${escapeHtml(session.started)} - ${events.length} screenshots</p>
       <div class="actions">
         <button class="primary" id="export-session">Export HTML</button>
+        <button class="secondary" id="export-annotated-images">Export selected annotated images</button>
+        <button class="secondary" id="export-original-images">Export selected clean images</button>
+        <button class="secondary" id="export-both-images">Export both image versions</button>
         <button class="secondary" id="back-sessions">Back to sessions</button>
       </div>
     </section>
     <section class="review-toolbar">
       <button class="secondary ${reviewFilter === "all" ? "selected" : ""}" data-review-filter="all">All screenshots</button>
       <button class="secondary ${reviewFilter === "highlights" ? "selected" : ""}" data-review-filter="highlights">Highlights only</button>
+      <button class="secondary" data-selection="all">Select all</button>
+      <button class="secondary" data-selection="none">Select none</button>
+      <button class="secondary" data-selection="highlights">Select highlights</button>
     </section>
     <section class="review-list">
       ${eventCards || "<p class='muted'>No screenshots match this filter.</p>"}
@@ -276,8 +290,14 @@ async function renderReview(sessionId) {
     const result = await api.post(`/api/sessions/${sessionId}/export`);
     alert(`Exported HTML: ${result.html}\nExported PDF: ${result.pdf}`);
   });
+  app.querySelector("#export-annotated-images").addEventListener("click", async () => exportImages(sessionId, "annotated"));
+  app.querySelector("#export-original-images").addEventListener("click", async () => exportImages(sessionId, "original"));
+  app.querySelector("#export-both-images").addEventListener("click", async () => exportImages(sessionId, "both"));
   app.querySelectorAll("[data-save-event]").forEach((button) => {
     button.addEventListener("click", async () => saveEvent(sessionId, button.dataset.saveEvent));
+  });
+  app.querySelectorAll("[data-update-marker]").forEach((button) => {
+    button.addEventListener("click", async () => updateMarker(sessionId, button.dataset.updateMarker));
   });
   app.querySelectorAll("[data-delete-event]").forEach((button) => {
     button.addEventListener("click", async () => deleteEvent(sessionId, button.dataset.deleteEvent));
@@ -294,6 +314,9 @@ async function renderReview(sessionId) {
       await renderReview(sessionId);
     });
   });
+  app.querySelectorAll("[data-selection]").forEach((button) => {
+    button.addEventListener("click", async () => bulkSelectEvents(session, button.dataset.selection));
+  });
 }
 
 function renderEventEditor(sessionId, event) {
@@ -303,6 +326,10 @@ function renderEventEditor(sessionId, event) {
   const redactionCount = Array.isArray(event.redactions) ? event.redactions.length : 0;
   const redactionLabel = redactionCount ? `<p class="redaction-count">${redactionCount} redaction${redactionCount === 1 ? "" : "s"} applied</p>` : "";
   const restoreButton = redactionCount ? `<button class="secondary" data-restore-original="${event.index}">Undo redactions</button>` : "";
+  const selected = event.selected_for_export !== false ? "checked" : "";
+  const markerEditor = event.type === "click" && Number.isFinite(Number(event.x)) && Number.isFinite(Number(event.y))
+    ? renderEventMarkerEditor(event)
+    : "";
   return `
     <article class="card event-editor">
       <div>
@@ -316,6 +343,8 @@ function renderEventEditor(sessionId, event) {
         <label>CYP quote <textarea data-field="cyp_quote" data-event="${event.index}">${escapeHtml(event.cyp_quote || "")}</textarea></label>
         <label>Tags <input data-field="tags" data-event="${event.index}" value="${escapeAttr(tags)}"></label>
         <label class="check-row"><input type="checkbox" data-field="highlight" data-event="${event.index}" ${checked}> Mark as highlight</label>
+        <label class="check-row"><input type="checkbox" data-field="selected_for_export" data-event="${event.index}" ${selected}> Include in export</label>
+        ${markerEditor}
         <div class="actions">
           <button class="primary" data-save-event="${event.index}">Save evidence note</button>
           <button class="secondary" data-redact-top="${event.index}">Redact top strip</button>
@@ -324,6 +353,30 @@ function renderEventEditor(sessionId, event) {
         </div>
       </div>
     </article>
+  `;
+}
+
+function renderEventMarkerEditor(event) {
+  const marker = event.marker || {};
+  const shape = marker.shape || "circle";
+  const color = marker.color || "#ef233c";
+  const size = marker.size || 32;
+  const stroke = marker.stroke || 3;
+  return `
+    <div class="marker-editor">
+      <label>Click marker shape
+        <select data-marker-field="shape" data-marker-event="${event.index}">
+          ${renderMarkerOption("circle", shape)}
+          ${renderMarkerOption("square", shape)}
+          ${renderMarkerOption("crosshair", shape)}
+          ${renderMarkerOption("arrow", shape)}
+        </select>
+      </label>
+      <label>Colour <input data-marker-field="color" data-marker-event="${event.index}" type="color" value="${escapeAttr(color)}"></label>
+      <label>Size <input data-marker-field="size" data-marker-event="${event.index}" type="number" min="6" value="${escapeAttr(size)}"></label>
+      <label>Stroke <input data-marker-field="stroke" data-marker-event="${event.index}" type="number" min="1" value="${escapeAttr(stroke)}"></label>
+      <button class="secondary" data-update-marker="${event.index}" type="button">Update marker</button>
+    </div>
   `;
 }
 
@@ -336,11 +389,38 @@ async function saveEvent(sessionId, eventIndex) {
       payload.tags = field.value.split(",").map((tag) => tag.trim()).filter(Boolean);
     } else if (key === "highlight") {
       payload.highlight = field.checked;
+    } else if (key === "selected_for_export") {
+      payload.selected_for_export = field.checked;
     } else {
       payload[key] = field.value;
     }
   });
   await api.patch(`/api/sessions/${sessionId}/events/${eventIndex}`, payload);
+  await renderReview(sessionId);
+}
+
+async function bulkSelectEvents(session, mode) {
+  const events = session.events || [];
+  for (const event of events) {
+    const selected = mode === "all" || (mode === "highlights" && event.highlight);
+    await api.patch(`/api/sessions/${session.id}/events/${event.index}`, { selected_for_export: selected });
+  }
+  await renderReview(session.id);
+}
+
+async function exportImages(sessionId, variant) {
+  const result = await api.post(`/api/sessions/${sessionId}/export-images`, { variant });
+  alert(`Exported image ZIP: ${result.zip}`);
+}
+
+async function updateMarker(sessionId, eventIndex) {
+  const fields = app.querySelectorAll(`[data-marker-event="${eventIndex}"]`);
+  const payload = {};
+  fields.forEach((field) => {
+    const key = field.dataset.markerField;
+    payload[key] = key === "size" || key === "stroke" ? Number(field.value) : field.value;
+  });
+  await api.post(`/api/sessions/${sessionId}/events/${eventIndex}/marker`, payload);
   await renderReview(sessionId);
 }
 
@@ -409,6 +489,17 @@ async function renderSettings() {
           ${renderPurposeOption("General observation", settings.default_evidence_purpose)}
         </select>
       </label>
+      <label>Click marker shape
+        <select name="marker_shape">
+          ${renderMarkerOption("circle", settings.marker_shape)}
+          ${renderMarkerOption("square", settings.marker_shape)}
+          ${renderMarkerOption("crosshair", settings.marker_shape)}
+          ${renderMarkerOption("arrow", settings.marker_shape)}
+        </select>
+      </label>
+      <label>Click marker colour <input name="marker_color" type="color" value="${escapeAttr(settings.marker_color)}"></label>
+      <label>Click marker size <input name="marker_size" type="number" min="6" value="${escapeAttr(settings.marker_size)}"></label>
+      <label>Click marker stroke <input name="marker_stroke" type="number" min="1" value="${escapeAttr(settings.marker_stroke)}"></label>
       <div class="actions">
         <button class="primary" type="submit">Save settings</button>
       </div>
@@ -422,6 +513,10 @@ async function renderSettings() {
       retention_days: Number(form.get("retention_days")),
       storage_warning_mb: Number(form.get("storage_warning_mb")),
       default_evidence_purpose: form.get("default_evidence_purpose"),
+      marker_shape: form.get("marker_shape"),
+      marker_color: form.get("marker_color"),
+      marker_size: Number(form.get("marker_size")),
+      marker_stroke: Number(form.get("marker_stroke")),
     });
     await renderSettings();
   });
@@ -452,6 +547,11 @@ function escapeAttr(value) {
 function renderPurposeOption(value, selectedValue) {
   const selected = value === selectedValue ? "selected" : "";
   return `<option ${selected}>${escapeHtml(value)}</option>`;
+}
+
+function renderMarkerOption(value, selectedValue) {
+  const selected = value === selectedValue ? "selected" : "";
+  return `<option value="${escapeAttr(value)}" ${selected}>${escapeHtml(value)}</option>`;
 }
 
 setInterval(async () => {

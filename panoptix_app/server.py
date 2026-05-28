@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from .annotation import update_event_marker
 from .app_paths import get_project_root
-from .exporter import SessionExporter
+from .exporter import ImageZipExporter, SessionExporter
 from .redaction import redact_event_screenshot, restore_original_screenshot
 from .recorder import Recorder
 from .retention import cleanup_old_sessions
@@ -73,6 +74,10 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
                     session_id = unquote(path.split("/")[-2])
                     output = SessionExporter(root).export(session_id)
                     self._json({"html": str(output["html"]), "pdf": str(output["pdf"])})
+                elif path.startswith("/api/sessions/") and path.endswith("/export-images"):
+                    session_id = unquote(path.split("/")[-2])
+                    output = ImageZipExporter(root).export(session_id, variant=payload.get("variant", "annotated"))
+                    self._json({"zip": str(output)})
                 elif path.startswith("/api/sessions/") and path.endswith("/redact"):
                     parts = path.split("/")
                     session_id = unquote(parts[3])
@@ -85,6 +90,11 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
                         preset=payload.get("preset") or "top_strip",
                     )
                     self._json(result)
+                elif path.startswith("/api/sessions/") and path.endswith("/marker"):
+                    parts = path.split("/")
+                    session_id = unquote(parts[3])
+                    event_index = int(parts[5])
+                    self._json(update_event_marker(store, session_id, event_index, payload))
                 elif path.startswith("/api/sessions/") and path.endswith("/restore-original"):
                     parts = path.split("/")
                     session_id = unquote(parts[3])

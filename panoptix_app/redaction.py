@@ -6,6 +6,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw
 
+from .annotation import annotate_click
 from .storage import SessionStore
 
 
@@ -78,6 +79,9 @@ def restore_original_screenshot(root: Path | SessionStore, session_id: str, even
     backup_path = screenshot_dir / "originals" / event["screenshot"]
     if not backup_path.exists():
         raise FileNotFoundError(backup_path)
-    shutil.copy2(backup_path, image_path)
+    if "x" in event and "y" in event:
+        annotate_click(backup_path, image_path, int(event["x"]), int(event["y"]), event.get("marker"))
+    else:
+        shutil.copy2(backup_path, image_path)
     session = store.update_event(session_id, event_index, {"redactions": []})
     return {"session": session, "event": next(item for item in session["events"] if item.get("index") == event_index)}

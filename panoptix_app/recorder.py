@@ -4,6 +4,7 @@ import threading
 from datetime import datetime
 from typing import Any
 
+from .annotation import DEFAULT_MARKER, annotate_click, normalize_marker
 from .capture import ScreenCapture
 from .hooks import GlobalMouseHook
 from .models import now_iso
@@ -110,13 +111,19 @@ class Recorder:
                 raise RuntimeError("Click capture is only available in evidence mode")
             session_id = self.active_session_id
             filename = self.store.next_screenshot_name(session_id)
-            screenshot = self.capture.capture(self.store.screenshot_dir(session_id), filename, (x, y))
+            screenshot_dir = self.store.screenshot_dir(session_id)
+            original_dir = screenshot_dir / "originals"
+            marker = normalize_marker(self.store.load_session(session_id).get("settings", {}).get("marker", DEFAULT_MARKER))
+            original = self.capture.capture(original_dir, filename)
+            screenshot = annotate_click(original, screenshot_dir / filename, x, y, marker)
             event = {
                 "type": "click",
                 "timestamp": now_iso(),
                 "screenshot": screenshot.name,
+                "original_screenshot": f"originals/{original.name}",
                 "x": x,
                 "y": y,
+                "marker": marker,
                 "title": "",
                 "staff_note": "",
                 "cyp_quote": "",

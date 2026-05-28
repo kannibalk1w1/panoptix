@@ -13,7 +13,11 @@ class PlaceholderCapture:
     def capture(self, output_dir: Path, filename: str, marker: tuple[int, int] | None = None) -> Path:
         output_dir.mkdir(parents=True, exist_ok=True)
         path = output_dir / filename
-        path.write_bytes(PLACEHOLDER_PNG)
+        try:
+            from PIL import Image
+            Image.new("RGB", (320, 180), "#202733").save(path)
+        except ImportError:
+            path.write_bytes(PLACEHOLDER_PNG)
         return path
 
 

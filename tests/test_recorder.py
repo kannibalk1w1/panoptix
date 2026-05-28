@@ -25,6 +25,8 @@ class RecorderTests(unittest.TestCase):
             self.assertEqual(event["type"], "click")
             self.assertEqual(event["x"], 120)
             self.assertEqual(event["y"], 240)
+            self.assertIn("original_screenshot", event)
+            self.assertIn("marker", event)
             self.assertEqual(len(loaded["events"]), 1)
 
     def test_status_includes_elapsed_seconds_and_event_count(self):

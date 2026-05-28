@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import base64
 import html
+import json
 from pathlib import Path
+from zipfile import ZipFile, ZIP_DEFLATED
 
 from .storage import SessionStore
+
+
+def selected_events(session: dict) -> list[dict]:
+    return [event for event in session.get("events", []) if event.get("selected_for_export", True)]
 
 
 class HtmlExporter:
@@ -23,9 +29,10 @@ class HtmlExporter:
     def _render(self, session: dict) -> str:
         metadata = session.get("metadata", {})
         title = metadata.get("activity") or "Panoptix Evidence Report"
-        highlights = [event for event in session.get("events", []) if event.get("highlight")]
+        events = selected_events(session)
+        highlights = [event for event in events if event.get("highlight")]
         highlight_cards = "\n".join(self._render_event(session, event) for event in highlights)
-        cards = "\n".join(self._render_event(session, event) for event in session.get("events", []))
+        cards = "\n".join(self._render_event(session, event) for event in events)
         metadata_rows = "\n".join(
             f"<dt>{html.escape(str(key).replace('_', ' ').title())}</dt><dd>{html.escape(str(value))}</dd>"
             for key, value in metadata.items()
@@ -138,7 +145,7 @@ class PdfExporter:
         if session.get("mode") == "observation":
             self._add_observation_pages(pdf, session)
         else:
-            for event in session.get("events", []):
+            for event in selected_events(session):
                 self._add_event_page(pdf, session, event, title)
         self._add_footers(pdf)
         pdf.output(str(output))
@@ -211,7 +218,8 @@ class PdfExporter:
             pdf.ln(6)
 
     def _add_observation_pages(self, pdf, session: dict) -> None:
-        highlighted = [event for event in session.get("events", []) if event.get("highlight")]
+        events = selected_events(session)
+        highlighted = [event for event in events if event.get("highlight")]
         pdf.add_page()
         pdf.set_font("Helvetica", "B", 16)
         pdf.cell(0, 10, "Highlights")
@@ -228,7 +236,7 @@ class PdfExporter:
         pdf.cell(0, 10, "Observation Timeline")
         pdf.ln(10)
         pdf.set_font("Helvetica", "", 10)
-        for event in session.get("events", []):
+        for event in events:
             if pdf.get_y() > 250:
                 pdf.add_page()
                 pdf.set_font("Helvetica", "B", 16)
@@ -313,3 +321,37 @@ class SessionExporter:
             "html": HtmlExporter(self.root).export(session_id),
             "pdf": PdfExporter(self.root).export(session_id),
         }
+
+
+class ImageZipExporter:
+    def __init__(self, root: Path):
+        self.root = Path(root)
+        self.store = SessionStore(self.root)
+
+    def export(self, session_id: str, variant: str = "annotated") -> Path:
+        session = self.store.load_session(session_id)
+        output_dir = self.root / "exports" / session_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output = output_dir / f"selected-images-{variant}.zip"
+        events = selected_events(session)
+        with ZipFile(output, "w", ZIP_DEFLATED) as archive:
+            archive.writestr("metadata.json", json.dumps({"session": session, "events": events}, indent=2))
+            for event in events:
+                for suffix, source in self._sources(session_id, event, variant):
+                    if source.exists():
+                        archive.write(source, self._archive_name(session_id, event, suffix))
+        return output
+
+    def _sources(self, session_id: str, event: dict, variant: str) -> list[tuple[str, Path]]:
+        screenshot_dir = self.root / "sessions" / session_id / "screenshots"
+        annotated = screenshot_dir / event["screenshot"]
+        original = screenshot_dir / "originals" / event["screenshot"]
+        if variant == "original":
+            return [("original", original if original.exists() else annotated)]
+        if variant == "both":
+            return [("original", original if original.exists() else annotated), ("annotated", annotated)]
+        return [("annotated", annotated)]
+
+    @staticmethod
+    def _archive_name(session_id: str, event: dict, suffix: str) -> str:
+        return f"Panoptix_{session_id}_{int(event['index']):03d}_{suffix}.png"
