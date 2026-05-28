@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from .app_paths import get_project_root
 from .exporter import SessionExporter
 from .redaction import redact_event_screenshot
 from .recorder import Recorder
@@ -18,7 +19,7 @@ from .storage_usage import get_storage_usage
 
 def create_handler(root: Path, store: SessionStore, recorder: Recorder):
     root = Path(root)
-    frontend_dir = root.parent / "frontend"
+    frontend_dir = get_project_root() / "frontend"
     settings_store = SettingsStore(root)
 
     class PanoptixHandler(BaseHTTPRequestHandler):

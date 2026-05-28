@@ -39,6 +39,15 @@ Install real screenshot support with:
 pip install -r C:\Users\Public\panoptix\requirements.txt
 ```
 
+## Build Windows EXE
+
+```powershell
+pip install pyinstaller
+powershell -ExecutionPolicy Bypass -File C:\Users\Public\panoptix\scripts\build_windows.ps1
+```
+
+The executable is written to `dist\Panoptix.exe`. Runtime data is stored under `%LOCALAPPDATA%\Panoptix\data` unless `PANOPTIX_DATA_DIR` is set.
+
 ## Test
 
 ```powershell
