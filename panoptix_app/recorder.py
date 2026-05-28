@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from datetime import datetime
 from typing import Any
 
 from .capture import ScreenCapture
@@ -16,6 +17,7 @@ class Recorder:
         self.hook_factory = hook_factory or GlobalMouseHook
         self.active_session_id: str | None = None
         self.active_mode: str | None = None
+        self.started_at: datetime | None = None
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._observation_thread: threading.Thread | None = None
@@ -23,11 +25,22 @@ class Recorder:
         self.hook_error: str | None = None
 
     def status(self) -> dict[str, Any]:
+        event_count = 0
+        elapsed_seconds = 0
+        if self.active_session_id is not None:
+            try:
+                event_count = len(self.store.load_session(self.active_session_id).get("events", []))
+            except FileNotFoundError:
+                event_count = 0
+        if self.started_at is not None:
+            elapsed_seconds = int((datetime.now() - self.started_at).total_seconds())
         return {
             "active": self.active_session_id is not None,
             "session_id": self.active_session_id,
             "mode": self.active_mode,
             "hook_error": self.hook_error,
+            "elapsed_seconds": elapsed_seconds,
+            "event_count": event_count,
         }
 
     def start(
@@ -42,6 +55,7 @@ class Recorder:
             session = self.store.create_session(mode, metadata or {}, settings or {})
             self.active_session_id = session["id"]
             self.active_mode = mode
+            self.started_at = datetime.now()
             self.hook_error = None
             self._stop_event.clear()
             if mode == "observation":
@@ -75,6 +89,7 @@ class Recorder:
             session = self.store.stop_session(self.active_session_id)
             self.active_session_id = None
             self.active_mode = None
+            self.started_at = None
             return session
 
     def capture_click(self, x: int, y: int) -> dict[str, Any]:

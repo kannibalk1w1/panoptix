@@ -3,6 +3,7 @@ const title = document.querySelector("#page-title");
 const statusPill = document.querySelector("#status");
 let currentView = "home";
 let currentSessionId = null;
+let latestStatus = { active: false };
 
 const api = {
   async get(path) {
@@ -37,7 +38,8 @@ document.querySelectorAll(".sidebar button").forEach((button) => {
 
 async function refreshStatus() {
   const status = await api.get("/api/status");
-  statusPill.textContent = status.active ? `${status.mode} recording` : "Idle";
+  latestStatus = status;
+  statusPill.textContent = status.active ? `${status.mode} recording - ${status.event_count} screenshots` : "Idle";
   if (status.hook_error) {
     statusPill.textContent += " - manual fallback";
   }
@@ -55,16 +57,24 @@ function setActive(view) {
 async function render(view) {
   setActive(view);
   const status = await refreshStatus();
-  if (view === "home") return renderHome();
-  if (view === "evidence") return renderStartForm("evidence", "Evidence Capture");
-  if (view === "observation") return renderStartForm("observation", "Observation Mode");
-  if (view === "sessions") return renderSessions();
-  return renderSettings();
+  if (view === "home") {
+    renderHome();
+  } else if (view === "evidence") {
+    await renderStartForm("evidence", "Evidence Capture");
+  } else if (view === "observation") {
+    await renderStartForm("observation", "Observation Mode");
+  } else if (view === "sessions") {
+    await renderSessions();
+  } else {
+    await renderSettings();
+  }
+  bindBannerStop();
 }
 
 function renderHome() {
   title.textContent = "Home";
   app.innerHTML = `
+    ${renderActiveBanner()}
     <div class="grid">
       <section class="card">
         <h2>Evidence Capture</h2>
@@ -91,6 +101,7 @@ async function renderStartForm(mode, heading) {
     ? `<label>Screenshot interval seconds <input name="interval_seconds" type="number" min="5" value="${escapeAttr(defaults.observation_interval_seconds)}"></label>`
     : "";
   app.innerHTML = `
+    ${renderActiveBanner()}
     <form class="form" id="start-form">
       <label>CYP initials <input name="cyp" autocomplete="off"></label>
       <label>Activity or project <input name="activity" autocomplete="off"></label>
@@ -111,7 +122,7 @@ async function renderStartForm(mode, heading) {
         <button class="danger" type="button" id="stop">Stop active recording</button>
       </div>
     </form>
-    <section class="card fallback-controls" id="manual-capture">
+    <section class="card fallback-controls ${latestStatus.hook_error ? "" : "hidden"}" id="manual-capture">
       <h2>Fallback capture controls</h2>
       <p class="muted">Use these only if global capture is unavailable or for local testing.</p>
       <div class="actions">
@@ -127,10 +138,13 @@ async function renderStartForm(mode, heading) {
     const settings = { interval_seconds: Number(form.get("interval_seconds") || 60) };
     await api.post("/api/record/start", { mode, metadata, settings });
     const status = await refreshStatus();
+    latestStatus = status;
     const note = app.querySelector("#hook-note");
     if (note && status.hook_error) {
       note.textContent = `${status.hook_error}. Manual capture buttons are still available for testing.`;
+      app.querySelector("#manual-capture")?.classList.remove("hidden");
     }
+    await render(mode);
   });
   app.querySelector("#stop").addEventListener("click", async () => {
     await api.post("/api/record/stop");
@@ -171,6 +185,42 @@ async function renderSessions() {
   app.querySelectorAll("[data-delete-session]").forEach((button) => {
     button.addEventListener("click", async () => deleteSession(button.dataset.deleteSession));
   });
+}
+
+function bindBannerStop() {
+  const button = app.querySelector("#banner-stop");
+  if (!button) {
+    return;
+  }
+  button.addEventListener("click", async () => {
+    await api.post("/api/record/stop");
+    await render(currentView);
+  });
+}
+
+function renderActiveBanner() {
+  if (!latestStatus.active) {
+    return "";
+  }
+  const mode = latestStatus.mode === "observation" ? "Observation Mode" : "Evidence Capture";
+  const elapsed = formatElapsed(latestStatus.elapsed_seconds || 0);
+  const fallback = latestStatus.hook_error ? `<p class="muted">${escapeHtml(latestStatus.hook_error)}</p>` : "";
+  return `
+    <section class="active-banner">
+      <div>
+        <h2>${escapeHtml(mode)} Active</h2>
+        <p>${escapeHtml(elapsed)} elapsed - ${escapeHtml(latestStatus.event_count || 0)} screenshots captured</p>
+        ${fallback}
+      </div>
+      <button class="danger" id="banner-stop">Stop recording</button>
+    </section>
+  `;
+}
+
+function formatElapsed(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
 async function renderReview(sessionId) {
@@ -358,4 +408,8 @@ function renderPurposeOption(value, selectedValue) {
   return `<option ${selected}>${escapeHtml(value)}</option>`;
 }
 
-render(currentView);
+setInterval(async () => {
+  await refreshStatus();
+}, 5000);
+
+render(currentView).then(bindBannerStop);

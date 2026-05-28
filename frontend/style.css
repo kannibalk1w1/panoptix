@@ -228,6 +228,27 @@ textarea {
   margin-top: 18px;
 }
 
+.hidden {
+  display: none;
+}
+
+.active-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: #112018;
+}
+
+.active-banner h2 {
+  margin-bottom: 6px;
+  color: var(--accent);
+}
+
 .redaction-count {
   color: var(--accent);
   font-weight: 700;

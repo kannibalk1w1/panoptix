@@ -27,6 +27,20 @@ class RecorderTests(unittest.TestCase):
             self.assertEqual(event["y"], 240)
             self.assertEqual(len(loaded["events"]), 1)
 
+    def test_status_includes_elapsed_seconds_and_event_count(self):
+        with TemporaryDirectory() as tmp:
+            store = SessionStore(Path(tmp))
+            recorder = Recorder(store, PlaceholderCapture())
+            recorder.start("evidence", {"cyp": "AB"}, {})
+            recorder.capture_click(120, 240)
+
+            status = recorder.status()
+            recorder.stop()
+
+            self.assertTrue(status["active"])
+            self.assertGreaterEqual(status["elapsed_seconds"], 0)
+            self.assertEqual(status["event_count"], 1)
+
     def test_observation_periodic_records_without_coordinates(self):
         with TemporaryDirectory() as tmp:
             store = SessionStore(Path(tmp))
