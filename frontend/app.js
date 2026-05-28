@@ -4,6 +4,7 @@ const statusPill = document.querySelector("#status");
 let currentView = "home";
 let currentSessionId = null;
 let latestStatus = { active: false };
+let reviewFilter = "all";
 
 const api = {
   async get(path) {
@@ -230,7 +231,8 @@ async function renderReview(sessionId) {
   const session = data.session;
   const metadata = session.metadata || {};
   const events = session.events || [];
-  const eventCards = events.map((event) => renderEventEditor(session.id, event)).join("");
+  const visibleEvents = reviewFilter === "highlights" ? events.filter((event) => event.highlight) : events;
+  const eventCards = visibleEvents.map((event) => renderEventEditor(session.id, event)).join("");
   app.innerHTML = `
     <section class="card">
       <h2>${escapeHtml(metadata.activity || session.id)}</h2>
@@ -240,8 +242,12 @@ async function renderReview(sessionId) {
         <button class="secondary" id="back-sessions">Back to sessions</button>
       </div>
     </section>
+    <section class="review-toolbar">
+      <button class="secondary ${reviewFilter === "all" ? "selected" : ""}" data-review-filter="all">All screenshots</button>
+      <button class="secondary ${reviewFilter === "highlights" ? "selected" : ""}" data-review-filter="highlights">Highlights only</button>
+    </section>
     <section class="review-list">
-      ${eventCards || "<p class='muted'>No screenshots captured for this session yet.</p>"}
+      ${eventCards || "<p class='muted'>No screenshots match this filter.</p>"}
     </section>
   `;
   app.querySelector("#back-sessions").addEventListener("click", renderSessions);
@@ -257,6 +263,12 @@ async function renderReview(sessionId) {
   });
   app.querySelectorAll("[data-redact-top]").forEach((button) => {
     button.addEventListener("click", async () => redactTopStrip(sessionId, button.dataset.redactTop));
+  });
+  app.querySelectorAll("[data-review-filter]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      reviewFilter = button.dataset.reviewFilter;
+      await renderReview(sessionId);
+    });
   });
 }
 
