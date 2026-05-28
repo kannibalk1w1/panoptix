@@ -83,6 +83,18 @@ class SessionStore:
         self._write_session(session)
         return session
 
+    def update_event(self, session_id: str, event_index: int, changes: dict[str, Any]) -> dict[str, Any]:
+        session = self.load_session(session_id)
+        allowed = {"title", "staff_note", "cyp_quote", "tags", "highlight"}
+        for event in session["events"]:
+            if event.get("index") == event_index:
+                for key, value in changes.items():
+                    if key in allowed:
+                        event[key] = value
+                self._write_session(session)
+                return session
+        raise KeyError(f"Event not found: {event_index}")
+
     def stop_session(self, session_id: str) -> dict[str, Any]:
         session = self.load_session(session_id)
         session["stopped"] = now_iso()

@@ -24,6 +24,8 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
                     self._json(recorder.status())
                 elif path == "/api/sessions":
                     self._json({"sessions": store.list_sessions()})
+                elif path.startswith("/api/sessions/") and "/screenshots/" in path:
+                    self._screenshot(path)
                 elif path.startswith("/api/sessions/"):
                     session_id = unquote(path.removeprefix("/api/sessions/"))
                     self._json({"session": store.load_session(session_id)})
@@ -62,7 +64,14 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
         def do_PATCH(self) -> None:
             path = urlparse(self.path).path
             try:
-                if path.startswith("/api/sessions/"):
+                if path.startswith("/api/sessions/") and "/events/" in path:
+                    parts = path.split("/")
+                    session_id = unquote(parts[3])
+                    event_index = int(parts[5])
+                    session = store.update_event(session_id, event_index, self._payload())
+                    event = next(item for item in session["events"] if item.get("index") == event_index)
+                    self._json({"session": session, "event": event})
+                elif path.startswith("/api/sessions/"):
                     session_id = unquote(path.removeprefix("/api/sessions/"))
                     self._json({"session": store.update_session(session_id, self._payload())})
                 else:
@@ -113,6 +122,24 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
             mime = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
             self.send_response(200)
             self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _screenshot(self, path: str) -> None:
+            parts = path.split("/")
+            session_id = unquote(parts[3])
+            filename = unquote(parts[5])
+            if "/" in filename or "\\" in filename or not filename.endswith(".png"):
+                self.send_error(404)
+                return
+            target = store.screenshot_dir(session_id) / filename
+            if not target.exists():
+                self.send_error(404)
+                return
+            body = target.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

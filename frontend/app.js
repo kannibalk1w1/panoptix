@@ -2,6 +2,7 @@ const app = document.querySelector("#app");
 const title = document.querySelector("#page-title");
 const statusPill = document.querySelector("#status");
 let currentView = "home";
+let currentSessionId = null;
 
 const api = {
   async get(path) {
@@ -11,6 +12,14 @@ const api = {
   async post(path, body = {}) {
     const response = await fetch(path, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return response.json();
+  },
+  async patch(path, body = {}) {
+    const response = await fetch(path, {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -96,9 +105,9 @@ function renderStartForm(mode, heading) {
         <button class="danger" type="button" id="stop">Stop active recording</button>
       </div>
     </form>
-    <section class="card" id="manual-capture">
-      <h2>Manual capture controls</h2>
-      <p class="muted">Temporary MVP controls until global mouse hooks are wired in.</p>
+    <section class="card fallback-controls" id="manual-capture">
+      <h2>Fallback capture controls</h2>
+      <p class="muted">Use these only if global capture is unavailable or for local testing.</p>
       <div class="actions">
         <button class="secondary" id="fake-click">Capture click at 100, 200</button>
         <button class="secondary" id="periodic">Capture observation screenshot</button>
@@ -141,16 +150,87 @@ async function renderSessions() {
         <strong>${escapeHtml(session.title)}</strong>
         <div class="muted">${session.mode} - ${session.started} - ${session.event_count} screenshots</div>
       </div>
-      <button class="secondary" data-export="${session.id}">Export HTML</button>
+      <button class="secondary" data-open="${session.id}">Review</button>
     </div>
   `).join("");
   app.innerHTML = `<section class="card">${rows || "<p class='muted'>No sessions yet.</p>"}</section>`;
-  app.querySelectorAll("[data-export]").forEach((button) => {
+  app.querySelectorAll("[data-open]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const result = await api.post(`/api/sessions/${button.dataset.export}/export`);
-      alert(`Exported: ${result.html}`);
+      await renderReview(button.dataset.open);
     });
   });
+}
+
+async function renderReview(sessionId) {
+  currentSessionId = sessionId;
+  title.textContent = "Review";
+  const data = await api.get(`/api/sessions/${sessionId}`);
+  const session = data.session;
+  const metadata = session.metadata || {};
+  const events = session.events || [];
+  const eventCards = events.map((event) => renderEventEditor(session.id, event)).join("");
+  app.innerHTML = `
+    <section class="card">
+      <h2>${escapeHtml(metadata.activity || session.id)}</h2>
+      <p class="muted">${escapeHtml(session.mode)} - ${escapeHtml(session.started)} - ${events.length} screenshots</p>
+      <div class="actions">
+        <button class="primary" id="export-session">Export HTML</button>
+        <button class="secondary" id="back-sessions">Back to sessions</button>
+      </div>
+    </section>
+    <section class="review-list">
+      ${eventCards || "<p class='muted'>No screenshots captured for this session yet.</p>"}
+    </section>
+  `;
+  app.querySelector("#back-sessions").addEventListener("click", renderSessions);
+  app.querySelector("#export-session").addEventListener("click", async () => {
+    const result = await api.post(`/api/sessions/${sessionId}/export`);
+    alert(`Exported: ${result.html}`);
+  });
+  app.querySelectorAll("[data-save-event]").forEach((button) => {
+    button.addEventListener("click", async () => saveEvent(sessionId, button.dataset.saveEvent));
+  });
+}
+
+function renderEventEditor(sessionId, event) {
+  const tags = Array.isArray(event.tags) ? event.tags.join(", ") : "";
+  const checked = event.highlight ? "checked" : "";
+  const imageUrl = `/api/sessions/${encodeURIComponent(sessionId)}/screenshots/${encodeURIComponent(event.screenshot || "")}`;
+  return `
+    <article class="card event-editor">
+      <div>
+        <img class="event-thumb" src="${imageUrl}" alt="Screenshot ${escapeAttr(event.index || "")}">
+        <p class="muted">${escapeHtml(event.type)} - ${escapeHtml(event.timestamp || "")}</p>
+      </div>
+      <div class="form">
+        <label>Title <input data-field="title" data-event="${event.index}" value="${escapeAttr(event.title || "")}"></label>
+        <label>Staff note <textarea data-field="staff_note" data-event="${event.index}">${escapeHtml(event.staff_note || "")}</textarea></label>
+        <label>CYP quote <textarea data-field="cyp_quote" data-event="${event.index}">${escapeHtml(event.cyp_quote || "")}</textarea></label>
+        <label>Tags <input data-field="tags" data-event="${event.index}" value="${escapeAttr(tags)}"></label>
+        <label class="check-row"><input type="checkbox" data-field="highlight" data-event="${event.index}" ${checked}> Mark as highlight</label>
+        <div class="actions">
+          <button class="primary" data-save-event="${event.index}">Save evidence note</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+async function saveEvent(sessionId, eventIndex) {
+  const fields = app.querySelectorAll(`[data-event="${eventIndex}"]`);
+  const payload = {};
+  fields.forEach((field) => {
+    const key = field.dataset.field;
+    if (key === "tags") {
+      payload.tags = field.value.split(",").map((tag) => tag.trim()).filter(Boolean);
+    } else if (key === "highlight") {
+      payload.highlight = field.checked;
+    } else {
+      payload[key] = field.value;
+    }
+  });
+  await api.patch(`/api/sessions/${sessionId}/events/${eventIndex}`, payload);
+  await renderReview(sessionId);
 }
 
 function renderSettings() {
@@ -171,6 +251,10 @@ function escapeHtml(value) {
     '"': "&quot;",
     "'": "&#039;",
   }[char]));
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value).replace(/`/g, "&#096;");
 }
 
 render(currentView);

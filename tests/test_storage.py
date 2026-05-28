@@ -58,6 +58,39 @@ class SessionStoreTests(unittest.TestCase):
 
             self.assertEqual([item["id"] for item in sessions], [second["id"], first["id"]])
 
+    def test_update_event_edits_notes_tags_and_highlight(self):
+        with TemporaryDirectory() as tmp:
+            store = SessionStore(Path(tmp))
+            session = store.create_session("observation", {}, {})
+            store.add_event(
+                session["id"],
+                {
+                    "type": "periodic",
+                    "timestamp": "2026-05-28T10:00:00",
+                    "screenshot": "001.png",
+                    "title": "",
+                    "staff_note": "",
+                    "highlight": False,
+                },
+            )
+
+            updated = store.update_event(
+                session["id"],
+                1,
+                {
+                    "title": "Good progress",
+                    "staff_note": "Stayed focused on the task.",
+                    "tags": ["project progress", "independent work"],
+                    "highlight": True,
+                },
+            )
+
+            event = updated["events"][0]
+            self.assertEqual(event["title"], "Good progress")
+            self.assertEqual(event["staff_note"], "Stayed focused on the task.")
+            self.assertEqual(event["tags"], ["project progress", "independent work"])
+            self.assertTrue(event["highlight"])
+
 
 if __name__ == "__main__":
     unittest.main()
