@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-from .exporter import HtmlExporter
+from .exporter import SessionExporter
 from .recorder import Recorder
 from .storage import SessionStore
 
@@ -54,8 +54,8 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
                     self._json({"event": recorder.capture_periodic()})
                 elif path.startswith("/api/sessions/") and path.endswith("/export"):
                     session_id = unquote(path.split("/")[-2])
-                    output = HtmlExporter(root).export(session_id)
-                    self._json({"html": str(output)})
+                    output = SessionExporter(root).export(session_id)
+                    self._json({"html": str(output["html"]), "pdf": str(output["pdf"])})
                 else:
                     self.send_error(404)
             except Exception as exc:

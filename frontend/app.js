@@ -185,7 +185,7 @@ async function renderReview(sessionId) {
   app.querySelector("#back-sessions").addEventListener("click", renderSessions);
   app.querySelector("#export-session").addEventListener("click", async () => {
     const result = await api.post(`/api/sessions/${sessionId}/export`);
-    alert(`Exported: ${result.html}`);
+    alert(`Exported HTML: ${result.html}\nExported PDF: ${result.pdf}`);
   });
   app.querySelectorAll("[data-save-event]").forEach((button) => {
     button.addEventListener("click", async () => saveEvent(sessionId, button.dataset.saveEvent));

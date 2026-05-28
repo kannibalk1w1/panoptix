@@ -21,6 +21,7 @@ http://127.0.0.1:8765
 - Observation Mode with automatic periodic screenshots.
 - Session list.
 - Self-contained HTML export.
+- Formal PDF export.
 - Vanilla dashboard served locally.
 
 Evidence Capture starts a global mouse hook when `pynput` is installed. If dependencies are missing, the dashboard stays usable and reports manual fallback mode.

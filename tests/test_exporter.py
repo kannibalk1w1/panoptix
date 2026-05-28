@@ -6,7 +6,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from panoptix_app.capture import PlaceholderCapture
-from panoptix_app.exporter import HtmlExporter
+from panoptix_app.exporter import HtmlExporter, SessionExporter
 from panoptix_app.storage import SessionStore
 
 
@@ -46,6 +46,40 @@ class HtmlExporterTests(unittest.TestCase):
             self.assertIn("Opened Scratch", html)
             self.assertIn("data:image/png;base64,", html)
             self.assertIn("independent work", html)
+
+    def test_session_exporter_writes_html_and_pdf(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SessionStore(root)
+            session = store.create_session(
+                "evidence",
+                {"cyp": "AB", "activity": "Scratch game", "staff": "KS"},
+                {},
+            )
+            screenshot = PlaceholderCapture().capture(
+                root / "sessions" / session["id"] / "screenshots",
+                "001.png",
+            )
+            store.add_event(
+                session["id"],
+                {
+                    "type": "click",
+                    "timestamp": "2026-05-28T10:00:00",
+                    "screenshot": screenshot.name,
+                    "x": 10,
+                    "y": 20,
+                    "title": "Opened Scratch",
+                    "staff_note": "CYP selected the correct project.",
+                    "cyp_quote": "I know where my game is.",
+                    "tags": ["independent work"],
+                },
+            )
+
+            output = SessionExporter(root).export(session["id"])
+
+            self.assertTrue(output["html"].exists())
+            self.assertTrue(output["pdf"].exists())
+            self.assertGreater(output["pdf"].stat().st_size, 500)
 
 
 if __name__ == "__main__":
