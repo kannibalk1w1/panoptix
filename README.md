@@ -23,6 +23,8 @@ http://127.0.0.1:8765
 - Self-contained HTML export.
 - Vanilla dashboard served locally.
 
+Evidence Capture starts a global mouse hook when `pynput` is installed. If dependencies are missing, the dashboard stays usable and reports manual fallback mode.
+
 The current capture layer falls back to placeholder PNGs if screenshot dependencies are not installed.
 
 ## Optional Dependencies

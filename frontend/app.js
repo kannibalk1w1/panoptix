@@ -25,7 +25,11 @@ document.querySelectorAll(".sidebar button").forEach((button) => {
 async function refreshStatus() {
   const status = await api.get("/api/status");
   statusPill.textContent = status.active ? `${status.mode} recording` : "Idle";
+  if (status.hook_error) {
+    statusPill.textContent += " - manual fallback";
+  }
   statusPill.classList.toggle("active", status.active);
+  return status;
 }
 
 function setActive(view) {
@@ -37,7 +41,7 @@ function setActive(view) {
 
 async function render(view) {
   setActive(view);
-  await refreshStatus();
+  const status = await refreshStatus();
   if (view === "home") return renderHome();
   if (view === "evidence") return renderStartForm("evidence", "Evidence Capture");
   if (view === "observation") return renderStartForm("observation", "Observation Mode");
@@ -86,6 +90,7 @@ function renderStartForm(mode, heading) {
       </label>
       <label>Privacy note <textarea name="privacy_note"></textarea></label>
       ${interval}
+      <p class="muted" id="hook-note"></p>
       <div class="actions">
         <button class="primary" type="submit">Start</button>
         <button class="danger" type="button" id="stop">Stop active recording</button>
@@ -106,7 +111,11 @@ function renderStartForm(mode, heading) {
     const metadata = Object.fromEntries(["cyp", "activity", "staff", "purpose", "privacy_note"].map((key) => [key, form.get(key)]));
     const settings = { interval_seconds: Number(form.get("interval_seconds") || 60) };
     await api.post("/api/record/start", { mode, metadata, settings });
-    await refreshStatus();
+    const status = await refreshStatus();
+    const note = app.querySelector("#hook-note");
+    if (note && status.hook_error) {
+      note.textContent = `${status.hook_error}. Manual capture buttons are still available for testing.`;
+    }
   });
   app.querySelector("#stop").addEventListener("click", async () => {
     await api.post("/api/record/stop");

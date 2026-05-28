@@ -4,25 +4,30 @@ import threading
 from typing import Any
 
 from .capture import ScreenCapture
+from .hooks import GlobalMouseHook
 from .models import now_iso
 from .storage import SessionStore
 
 
 class Recorder:
-    def __init__(self, store: SessionStore, capture: Any | None = None):
+    def __init__(self, store: SessionStore, capture: Any | None = None, hook_factory: Any | None = None):
         self.store = store
         self.capture = capture or ScreenCapture()
+        self.hook_factory = hook_factory or GlobalMouseHook
         self.active_session_id: str | None = None
         self.active_mode: str | None = None
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._observation_thread: threading.Thread | None = None
+        self._mouse_hook: Any | None = None
+        self.hook_error: str | None = None
 
     def status(self) -> dict[str, Any]:
         return {
             "active": self.active_session_id is not None,
             "session_id": self.active_session_id,
             "mode": self.active_mode,
+            "hook_error": self.hook_error,
         }
 
     def start(
@@ -37,6 +42,7 @@ class Recorder:
             session = self.store.create_session(mode, metadata or {}, settings or {})
             self.active_session_id = session["id"]
             self.active_mode = mode
+            self.hook_error = None
             self._stop_event.clear()
             if mode == "observation":
                 interval = float((settings or {}).get("interval_seconds", 60))
@@ -46,6 +52,13 @@ class Recorder:
                     daemon=True,
                 )
                 self._observation_thread.start()
+            if mode == "evidence":
+                self._mouse_hook = self.hook_factory(self.capture_click)
+                try:
+                    self._mouse_hook.start()
+                except RuntimeError as exc:
+                    self.hook_error = str(exc)
+                    self._mouse_hook = None
             return session
 
     def stop(self) -> dict[str, Any] | None:
@@ -53,6 +66,9 @@ class Recorder:
         if self._observation_thread is not None:
             self._observation_thread.join(timeout=2)
             self._observation_thread = None
+        if self._mouse_hook is not None:
+            self._mouse_hook.stop()
+            self._mouse_hook = None
         with self._lock:
             if self.active_session_id is None:
                 return None
