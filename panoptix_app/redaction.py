@@ -55,9 +55,16 @@ def redact_event_screenshot(
 
 def _resolve_box(size: tuple[int, int], rect: dict[str, int] | None, preset: str | None) -> tuple[int, int, int, int]:
     width, height = size
+    strip_height = max(1, int(height * 0.14))
+    strip_width = max(1, int(width * 0.14))
     if preset == "top_strip":
-        strip_height = max(1, int(height * 0.14))
         return (0, 0, width, strip_height)
+    if preset == "bottom_strip":
+        return (0, height - strip_height, width, height)
+    if preset == "left_strip":
+        return (0, 0, strip_width, height)
+    if preset == "right_strip":
+        return (width - strip_width, 0, width, height)
     if rect is None:
         raise ValueError("Redaction requires rect or preset")
     x = max(0, int(rect["x"]))

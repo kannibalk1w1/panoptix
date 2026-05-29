@@ -250,6 +250,15 @@ textarea {
   align-self: end;
 }
 
+.redaction-history {
+  margin: 0;
+  padding: 10px 12px 10px 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #10161f;
+  color: var(--muted);
+}
+
 .fallback-controls {
   margin-top: 18px;
 }

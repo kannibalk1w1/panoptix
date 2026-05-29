@@ -302,8 +302,8 @@ async function renderReview(sessionId) {
   app.querySelectorAll("[data-delete-event]").forEach((button) => {
     button.addEventListener("click", async () => deleteEvent(sessionId, button.dataset.deleteEvent));
   });
-  app.querySelectorAll("[data-redact-top]").forEach((button) => {
-    button.addEventListener("click", async () => redactTopStrip(sessionId, button.dataset.redactTop));
+  app.querySelectorAll("[data-redact-preset]").forEach((button) => {
+    button.addEventListener("click", async () => redactPreset(sessionId, button.dataset.redactPreset, button.dataset.preset));
   });
   app.querySelectorAll("[data-redact-box]").forEach((button) => {
     button.addEventListener("click", async () => redactBox(sessionId, button.dataset.redactBox));
@@ -347,11 +347,11 @@ function renderEventEditor(sessionId, event) {
         <label>Tags <input data-field="tags" data-event="${event.index}" value="${escapeAttr(tags)}"></label>
         <label class="check-row"><input type="checkbox" data-field="highlight" data-event="${event.index}" ${checked}> Mark as highlight</label>
         <label class="check-row"><input type="checkbox" data-field="selected_for_export" data-event="${event.index}" ${selected}> Include in export</label>
+        ${renderRedactionHistory(event)}
         ${renderRedactionBoxEditor(event)}
         ${markerEditor}
         <div class="actions">
           <button class="primary" data-save-event="${event.index}">Save evidence note</button>
-          <button class="secondary" data-redact-top="${event.index}">Redact top strip</button>
           ${restoreButton}
           <button class="danger" data-delete-event="${event.index}">Remove from report</button>
         </div>
@@ -360,9 +360,24 @@ function renderEventEditor(sessionId, event) {
   `;
 }
 
+function renderRedactionHistory(event) {
+  const redactions = Array.isArray(event.redactions) ? event.redactions : [];
+  if (!redactions.length) {
+    return "";
+  }
+  const rows = redactions.map((redaction) => `
+    <li>${escapeHtml(redaction.preset || "manual")} - x ${escapeHtml(redaction.x)}, y ${escapeHtml(redaction.y)}, ${escapeHtml(redaction.width)} x ${escapeHtml(redaction.height)}</li>
+  `).join("");
+  return `<ul class="redaction-history">${rows}</ul>`;
+}
+
 function renderRedactionBoxEditor(event) {
   return `
     <div class="redaction-editor">
+      <button class="secondary" data-redact-preset="${event.index}" data-preset="top_strip" type="button">Top strip</button>
+      <button class="secondary" data-redact-preset="${event.index}" data-preset="bottom_strip" type="button">Bottom strip</button>
+      <button class="secondary" data-redact-preset="${event.index}" data-preset="left_strip" type="button">Left strip</button>
+      <button class="secondary" data-redact-preset="${event.index}" data-preset="right_strip" type="button">Right strip</button>
       <label>X <input class="redaction-field" data-redaction-field="x" data-redaction-event="${event.index}" type="number" min="0" value="0"></label>
       <label>Y <input class="redaction-field" data-redaction-field="y" data-redaction-event="${event.index}" type="number" min="0" value="0"></label>
       <label>Width <input class="redaction-field" data-redaction-field="width" data-redaction-event="${event.index}" type="number" min="1" value="120"></label>
@@ -448,11 +463,11 @@ async function deleteEvent(sessionId, eventIndex) {
   await renderReview(sessionId);
 }
 
-async function redactTopStrip(sessionId, eventIndex) {
-  if (!confirm("Apply a black redaction strip across the top of this screenshot? A backup of the original is kept locally.")) {
+async function redactPreset(sessionId, eventIndex, preset) {
+  if (!confirm("Apply this black redaction preset to the screenshot? A backup of the original is kept locally.")) {
     return;
   }
-  await api.post(`/api/sessions/${sessionId}/events/${eventIndex}/redact`, { preset: "top_strip" });
+  await api.post(`/api/sessions/${sessionId}/events/${eventIndex}/redact`, { preset });
   await renderReview(sessionId);
 }
 

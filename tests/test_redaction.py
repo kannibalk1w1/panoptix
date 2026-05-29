@@ -65,6 +65,30 @@ class RedactionTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
+    def test_redact_edge_strip_presets_cover_expected_edges(self):
+        cases = (
+            ("bottom_strip", (10, 95), (10, 10)),
+            ("left_strip", (5, 50), (50, 50)),
+            ("right_strip", (95, 50), (50, 50)),
+        )
+        for preset, black_pixel, white_pixel in cases:
+            with self.subTest(preset=preset):
+                with TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    store = SessionStore(root)
+                    session = store.create_session("evidence", {}, {})
+                    screenshot_dir = store.screenshot_dir(session["id"])
+                    image_path = screenshot_dir / "001.png"
+                    Image.new("RGB", (100, 100), "white").save(image_path)
+                    store.add_event(session["id"], {"type": "click", "timestamp": "now", "screenshot": "001.png"})
+
+                    result = redact_event_screenshot(root, session["id"], 1, preset=preset)
+
+                    self.assertEqual(result["event"]["redactions"][0]["preset"], preset)
+                    with Image.open(image_path) as image:
+                        self.assertEqual(image.getpixel(black_pixel), (0, 0, 0))
+                        self.assertEqual(image.getpixel(white_pixel), (255, 255, 255))
+
     def test_redact_manual_box_endpoint_records_manual_redaction(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
