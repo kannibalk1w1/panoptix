@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import csv
 import html
 import json
+from io import StringIO
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 
@@ -345,13 +347,70 @@ class ImageZipExporter:
     def _sources(self, session_id: str, event: dict, variant: str) -> list[tuple[str, Path]]:
         screenshot_dir = self.root / "sessions" / session_id / "screenshots"
         annotated = screenshot_dir / event["screenshot"]
-        original = screenshot_dir / "originals" / event["screenshot"]
+        original = self._original_source(screenshot_dir, event) or annotated
         if variant == "original":
-            return [("original", original if original.exists() else annotated)]
+            return [("original", original)]
         if variant == "both":
-            return [("original", original if original.exists() else annotated), ("annotated", annotated)]
+            return [("original", original), ("annotated", annotated)]
         return [("annotated", annotated)]
+
+    @staticmethod
+    def _original_source(screenshot_dir: Path, event: dict) -> Path | None:
+        candidates = []
+        if event.get("original_screenshot"):
+            candidates.append(screenshot_dir / event["original_screenshot"])
+        if event.get("screenshot"):
+            candidates.append(screenshot_dir / "originals" / event["screenshot"])
+        return next((candidate for candidate in candidates if candidate.exists()), None)
 
     @staticmethod
     def _archive_name(session_id: str, event: dict, suffix: str) -> str:
         return f"Panoptix_{session_id}_{int(event['index']):03d}_{suffix}.png"
+
+
+class EvidencePackExporter:
+    def __init__(self, root: Path):
+        self.root = Path(root)
+        self.store = SessionStore(self.root)
+
+    def export(self, session_id: str) -> Path:
+        session = self.store.load_session(session_id)
+        output_dir = self.root / "exports" / session_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output = output_dir / "evidence-pack.zip"
+        report_paths = SessionExporter(self.root).export(session_id)
+        events = selected_events(session)
+        manifest = {"session": {**session, "events": events}, "events": events}
+        image_exporter = ImageZipExporter(self.root)
+
+        with ZipFile(output, "w", ZIP_DEFLATED) as archive:
+            archive.write(report_paths["html"], "reports/evidence-report.html")
+            archive.write(report_paths["pdf"], "reports/evidence-report.pdf")
+            archive.writestr("manifest.json", json.dumps(manifest, indent=2))
+            archive.writestr("manifest.csv", self._csv(events))
+            for event in events:
+                for suffix, source in image_exporter._sources(session_id, event, "both"):
+                    if source.exists():
+                        archive.write(source, f"images/{image_exporter._archive_name(session_id, event, suffix)}")
+        return output
+
+    @staticmethod
+    def _csv(events: list[dict]) -> str:
+        output = StringIO()
+        fieldnames = [
+            "index",
+            "title",
+            "timestamp",
+            "type",
+            "highlight",
+            "tags",
+            "screenshot",
+            "original_screenshot",
+        ]
+        writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore", lineterminator="\n")
+        writer.writeheader()
+        for event in events:
+            row = dict(event)
+            row["tags"] = "; ".join(str(tag) for tag in event.get("tags", []))
+            writer.writerow(row)
+        return output.getvalue()

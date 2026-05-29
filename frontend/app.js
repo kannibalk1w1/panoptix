@@ -268,6 +268,7 @@ async function renderReview(sessionId) {
       <p class="muted">${escapeHtml(session.mode)} - ${escapeHtml(session.started)} - ${events.length} screenshots</p>
       <div class="actions">
         <button class="primary" id="export-session">Export HTML</button>
+        <button class="secondary" id="export-pack">Export evidence pack</button>
         <button class="secondary" id="export-annotated-images">Export selected annotated images</button>
         <button class="secondary" id="export-original-images">Export selected clean images</button>
         <button class="secondary" id="export-both-images">Export both image versions</button>
@@ -290,6 +291,7 @@ async function renderReview(sessionId) {
     const result = await api.post(`/api/sessions/${sessionId}/export`);
     alert(`Exported HTML: ${result.html}\nExported PDF: ${result.pdf}`);
   });
+  app.querySelector("#export-pack").addEventListener("click", async () => exportEvidencePack(sessionId));
   app.querySelector("#export-annotated-images").addEventListener("click", async () => exportImages(sessionId, "annotated"));
   app.querySelector("#export-original-images").addEventListener("click", async () => exportImages(sessionId, "original"));
   app.querySelector("#export-both-images").addEventListener("click", async () => exportImages(sessionId, "both"));
@@ -442,6 +444,11 @@ async function bulkSelectEvents(session, mode) {
 async function exportImages(sessionId, variant) {
   const result = await api.post(`/api/sessions/${sessionId}/export-images`, { variant });
   alert(`Exported image ZIP: ${result.zip}`);
+}
+
+async function exportEvidencePack(sessionId) {
+  const result = await api.post(`/api/sessions/${sessionId}/export-pack`, {});
+  alert(`Exported evidence pack: ${result.zip}`);
 }
 
 async function updateMarker(sessionId, eventIndex) {

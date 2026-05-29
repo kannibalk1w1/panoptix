@@ -9,7 +9,7 @@ from urllib.parse import unquote, urlparse
 
 from .annotation import update_event_marker
 from .app_paths import get_project_root
-from .exporter import ImageZipExporter, SessionExporter
+from .exporter import EvidencePackExporter, ImageZipExporter, SessionExporter
 from .redaction import redact_event_screenshot, restore_original_screenshot
 from .recorder import Recorder
 from .retention import cleanup_old_sessions
@@ -77,6 +77,10 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
                 elif path.startswith("/api/sessions/") and path.endswith("/export-images"):
                     session_id = unquote(path.split("/")[-2])
                     output = ImageZipExporter(root).export(session_id, variant=payload.get("variant", "annotated"))
+                    self._json({"zip": str(output)})
+                elif path.startswith("/api/sessions/") and path.endswith("/export-pack"):
+                    session_id = unquote(path.split("/")[-2])
+                    output = EvidencePackExporter(root).export(session_id)
                     self._json({"zip": str(output)})
                 elif path.startswith("/api/sessions/") and path.endswith("/redact"):
                     parts = path.split("/")

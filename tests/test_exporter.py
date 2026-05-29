@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from panoptix_app.capture import PlaceholderCapture
-from panoptix_app.exporter import HtmlExporter, ImageZipExporter, SessionExporter
+from panoptix_app.exporter import EvidencePackExporter, HtmlExporter, ImageZipExporter, SessionExporter
 from panoptix_app.storage import SessionStore
 
 
@@ -152,6 +152,48 @@ class HtmlExporterTests(unittest.TestCase):
             self.assertIn("metadata.json", names)
             self.assertTrue(any(name.endswith("001_annotated.png") for name in names))
             self.assertFalse(any(name.endswith("002_annotated.png") for name in names))
+
+    def test_evidence_pack_export_includes_reports_images_and_manifests(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SessionStore(root)
+            session = store.create_session("evidence", {"activity": "Pack test", "staff": "KS"}, {})
+            screenshot_dir = root / "sessions" / session["id"] / "screenshots"
+            originals_dir = screenshot_dir / "originals"
+            originals_dir.mkdir(parents=True)
+            for index, selected in ((1, True), (2, False)):
+                screenshot = PlaceholderCapture().capture(screenshot_dir, f"{index:03d}.png")
+                PlaceholderCapture().capture(originals_dir, f"{index:03d}.png")
+                store.add_event(
+                    session["id"],
+                    {
+                        "type": "click",
+                        "timestamp": f"2026-05-28T10:0{index}:00",
+                        "screenshot": screenshot.name,
+                        "original_screenshot": f"originals/{screenshot.name}",
+                        "title": f"Event {index}",
+                        "tags": ["uas"],
+                        "selected_for_export": selected,
+                    },
+                )
+
+            output = EvidencePackExporter(root).export(session["id"])
+
+            with ZipFile(output) as archive:
+                names = archive.namelist()
+                manifest = archive.read("manifest.json").decode("utf-8")
+                csv_manifest = archive.read("manifest.csv").decode("utf-8")
+
+            self.assertIn("reports/evidence-report.html", names)
+            self.assertIn("reports/evidence-report.pdf", names)
+            self.assertIn("manifest.json", names)
+            self.assertIn("manifest.csv", names)
+            self.assertTrue(any(name.endswith("001_annotated.png") for name in names))
+            self.assertTrue(any(name.endswith("001_original.png") for name in names))
+            self.assertFalse(any(name.endswith("002_annotated.png") for name in names))
+            self.assertIn("Event 1", manifest)
+            self.assertNotIn("Event 2", manifest)
+            self.assertIn("index,title,timestamp,type,highlight,tags,screenshot,original_screenshot", csv_manifest)
 
     def test_observation_pdf_uses_contact_sheet_layout(self):
         with TemporaryDirectory() as tmp:
