@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import ZipFile
+import json
 import sys
 import unittest
 
@@ -181,7 +182,7 @@ class HtmlExporterTests(unittest.TestCase):
 
             with ZipFile(output) as archive:
                 names = archive.namelist()
-                manifest = archive.read("manifest.json").decode("utf-8")
+                manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
                 csv_manifest = archive.read("manifest.csv").decode("utf-8")
 
             self.assertIn("reports/evidence-report.html", names)
@@ -191,9 +192,16 @@ class HtmlExporterTests(unittest.TestCase):
             self.assertTrue(any(name.endswith("001_annotated.png") for name in names))
             self.assertTrue(any(name.endswith("001_original.png") for name in names))
             self.assertFalse(any(name.endswith("002_annotated.png") for name in names))
-            self.assertIn("Event 1", manifest)
-            self.assertNotIn("Event 2", manifest)
-            self.assertIn("index,title,timestamp,type,highlight,tags,screenshot,original_screenshot", csv_manifest)
+            self.assertEqual(manifest["events"][0]["title"], "Event 1")
+            self.assertNotIn("Event 2", json.dumps(manifest))
+            self.assertTrue(all(len(item["sha256"]) == 64 for item in manifest["files"]))
+            self.assertTrue(all(item["size_bytes"] > 0 for item in manifest["files"]))
+            self.assertIn("reports/evidence-report.html", {item["path"] for item in manifest["files"]})
+            self.assertIn(
+                "index,title,timestamp,type,highlight,tags,screenshot,original_screenshot,files",
+                csv_manifest,
+            )
+            self.assertIn("sha256=", csv_manifest)
 
     def test_observation_pdf_uses_contact_sheet_layout(self):
         with TemporaryDirectory() as tmp:

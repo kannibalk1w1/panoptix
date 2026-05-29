@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import hashlib
 import html
 import json
 from io import StringIO
@@ -380,22 +381,50 @@ class EvidencePackExporter:
         output = output_dir / "evidence-pack.zip"
         report_paths = SessionExporter(self.root).export(session_id)
         events = selected_events(session)
-        manifest = {"session": {**session, "events": events}, "events": events}
         image_exporter = ImageZipExporter(self.root)
+        files: list[dict] = []
 
         with ZipFile(output, "w", ZIP_DEFLATED) as archive:
-            archive.write(report_paths["html"], "reports/evidence-report.html")
-            archive.write(report_paths["pdf"], "reports/evidence-report.pdf")
-            archive.writestr("manifest.json", json.dumps(manifest, indent=2))
-            archive.writestr("manifest.csv", self._csv(events))
+            self._write_file(archive, files, report_paths["html"], "reports/evidence-report.html")
+            self._write_file(archive, files, report_paths["pdf"], "reports/evidence-report.pdf")
             for event in events:
                 for suffix, source in image_exporter._sources(session_id, event, "both"):
                     if source.exists():
-                        archive.write(source, f"images/{image_exporter._archive_name(session_id, event, suffix)}")
+                        self._write_file(
+                            archive,
+                            files,
+                            source,
+                            f"images/{image_exporter._archive_name(session_id, event, suffix)}",
+                            event_index=event.get("index"),
+                            variant=suffix,
+                        )
+            manifest = {"session": {**session, "events": events}, "events": events, "files": files}
+            archive.writestr("manifest.json", json.dumps(manifest, indent=2))
+            archive.writestr("manifest.csv", self._csv(events, files))
         return output
 
     @staticmethod
-    def _csv(events: list[dict]) -> str:
+    def _write_file(
+        archive: ZipFile,
+        manifest_files: list[dict],
+        source: Path,
+        archive_path: str,
+        event_index: int | None = None,
+        variant: str | None = None,
+    ) -> None:
+        archive.write(source, archive_path)
+        manifest_files.append(
+            {
+                "path": archive_path,
+                "size_bytes": source.stat().st_size,
+                "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "event_index": event_index,
+                "variant": variant,
+            }
+        )
+
+    @staticmethod
+    def _csv(events: list[dict], files: list[dict]) -> str:
         output = StringIO()
         fieldnames = [
             "index",
@@ -406,11 +435,16 @@ class EvidencePackExporter:
             "tags",
             "screenshot",
             "original_screenshot",
+            "files",
         ]
         writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore", lineterminator="\n")
         writer.writeheader()
         for event in events:
             row = dict(event)
             row["tags"] = "; ".join(str(tag) for tag in event.get("tags", []))
+            event_files = [item for item in files if item.get("event_index") == event.get("index")]
+            row["files"] = "; ".join(
+                f"{item['path']} sha256={item['sha256']} size={item['size_bytes']}" for item in event_files
+            )
             writer.writerow(row)
         return output.getvalue()
