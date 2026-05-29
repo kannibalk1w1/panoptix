@@ -269,6 +269,7 @@ async function renderReview(sessionId) {
       <div class="actions">
         <button class="primary" id="export-session">Export HTML</button>
         <button class="secondary" id="export-pack">Export evidence pack</button>
+        <button class="secondary" id="verify-pack">Verify evidence pack</button>
         <button class="secondary" id="export-annotated-images">Export selected annotated images</button>
         <button class="secondary" id="export-original-images">Export selected clean images</button>
         <button class="secondary" id="export-both-images">Export both image versions</button>
@@ -292,6 +293,7 @@ async function renderReview(sessionId) {
     alert(`Exported HTML: ${result.html}\nExported PDF: ${result.pdf}`);
   });
   app.querySelector("#export-pack").addEventListener("click", async () => exportEvidencePack(sessionId));
+  app.querySelector("#verify-pack").addEventListener("click", async () => verifyEvidencePack(sessionId));
   app.querySelector("#export-annotated-images").addEventListener("click", async () => exportImages(sessionId, "annotated"));
   app.querySelector("#export-original-images").addEventListener("click", async () => exportImages(sessionId, "original"));
   app.querySelector("#export-both-images").addEventListener("click", async () => exportImages(sessionId, "both"));
@@ -449,6 +451,14 @@ async function exportImages(sessionId, variant) {
 async function exportEvidencePack(sessionId) {
   const result = await api.post(`/api/sessions/${sessionId}/export-pack`, {});
   alert(`Exported evidence pack: ${result.zip}`);
+}
+
+async function verifyEvidencePack(sessionId) {
+  const result = await api.post(`/api/sessions/${sessionId}/verify-pack`, {});
+  const message = result.ok
+    ? `Evidence pack verified: ${result.checked} files checked.`
+    : `Evidence pack failed verification: ${result.failure_count} issue${result.failure_count === 1 ? "" : "s"}.`;
+  alert(message);
 }
 
 async function updateMarker(sessionId, eventIndex) {

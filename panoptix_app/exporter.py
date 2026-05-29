@@ -7,7 +7,7 @@ import html
 import json
 from io import StringIO
 from pathlib import Path
-from zipfile import ZipFile, ZIP_DEFLATED
+from zipfile import ZipFile, ZIP_DEFLATED, BadZipFile
 
 from .storage import SessionStore
 
@@ -448,3 +448,63 @@ class EvidencePackExporter:
             )
             writer.writerow(row)
         return output.getvalue()
+
+
+class EvidencePackVerifier:
+    def __init__(self, root: Path):
+        self.root = Path(root)
+        self.store = SessionStore(self.root)
+
+    def verify(self, session_id: str) -> dict:
+        self.store.load_session(session_id)
+        pack_path = self.root / "exports" / session_id / "evidence-pack.zip"
+        failures = []
+        checked = 0
+        try:
+            with ZipFile(pack_path) as archive:
+                manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+                files = manifest.get("files", [])
+                checked = len(files)
+                archive_names = archive.namelist()
+                for item in files:
+                    failure = self._verify_file(archive, item, archive_names)
+                    if failure:
+                        failures.append(failure)
+        except FileNotFoundError:
+            failures.append({"path": str(pack_path), "reason": "pack_missing"})
+        except (BadZipFile, KeyError, json.JSONDecodeError) as exc:
+            failures.append({"path": str(pack_path), "reason": type(exc).__name__})
+
+        return {
+            "ok": not failures,
+            "checked": checked,
+            "failure_count": len(failures),
+            "failures": failures,
+        }
+
+    @staticmethod
+    def _verify_file(archive: ZipFile, item: dict, archive_names: list[str]) -> dict | None:
+        path = item["path"]
+        if archive_names.count(path) > 1:
+            return {"path": path, "reason": "duplicate_path"}
+        try:
+            data = archive.read(path)
+        except KeyError:
+            return {"path": path, "reason": "missing"}
+        actual_size = len(data)
+        actual_sha256 = hashlib.sha256(data).hexdigest()
+        reasons = []
+        if actual_size != item.get("size_bytes"):
+            reasons.append("size_mismatch")
+        if actual_sha256 != item.get("sha256"):
+            reasons.append("sha256_mismatch")
+        if not reasons:
+            return None
+        return {
+            "path": path,
+            "reason": ",".join(reasons),
+            "expected_size": item.get("size_bytes"),
+            "actual_size": actual_size,
+            "expected_sha256": item.get("sha256"),
+            "actual_sha256": actual_sha256,
+        }

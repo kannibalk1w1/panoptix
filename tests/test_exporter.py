@@ -4,11 +4,12 @@ from zipfile import ZipFile
 import json
 import sys
 import unittest
+import warnings
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from panoptix_app.capture import PlaceholderCapture
-from panoptix_app.exporter import EvidencePackExporter, HtmlExporter, ImageZipExporter, SessionExporter
+from panoptix_app.exporter import EvidencePackExporter, EvidencePackVerifier, HtmlExporter, ImageZipExporter, SessionExporter
 from panoptix_app.storage import SessionStore
 
 
@@ -202,6 +203,37 @@ class HtmlExporterTests(unittest.TestCase):
                 csv_manifest,
             )
             self.assertIn("sha256=", csv_manifest)
+
+    def test_evidence_pack_verifier_reports_valid_and_tampered_files(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SessionStore(root)
+            session = store.create_session("evidence", {"activity": "Verify pack"}, {})
+            screenshot_dir = root / "sessions" / session["id"] / "screenshots"
+            screenshot = PlaceholderCapture().capture(screenshot_dir, "001.png")
+            store.add_event(
+                session["id"],
+                {
+                    "type": "click",
+                    "timestamp": "2026-05-28T10:00:00",
+                    "screenshot": screenshot.name,
+                    "title": "Valid event",
+                },
+            )
+            pack = EvidencePackExporter(root).export(session["id"])
+
+            valid = EvidencePackVerifier(root).verify(session["id"])
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                with ZipFile(pack, "a") as archive:
+                    archive.writestr("reports/evidence-report.html", "tampered")
+            tampered = EvidencePackVerifier(root).verify(session["id"])
+
+            self.assertTrue(valid["ok"])
+            self.assertEqual(valid["failure_count"], 0)
+            self.assertFalse(tampered["ok"])
+            self.assertEqual(tampered["failure_count"], 1)
+            self.assertEqual(tampered["failures"][0]["path"], "reports/evidence-report.html")
 
     def test_observation_pdf_uses_contact_sheet_layout(self):
         with TemporaryDirectory() as tmp:

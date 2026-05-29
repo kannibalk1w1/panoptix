@@ -23,7 +23,7 @@ http://127.0.0.1:8765
 - Review workflow with notes, tags, highlights, selected export flags, redactions, and click marker styling.
 - Self-contained HTML export.
 - Formal PDF export.
-- Evidence pack ZIP export with HTML, PDF, selected clean/annotated screenshots, CSV manifest, JSON manifest, file sizes, and SHA-256 checksums.
+- Evidence pack ZIP export and verification with HTML, PDF, selected clean/annotated screenshots, CSV manifest, JSON manifest, file sizes, and SHA-256 checksums.
 - Persistent settings for observation interval, retention days, storage warning, and default evidence purpose.
 - Local storage usage display and warning threshold.
 - Retention cleanup for deleting sessions older than the configured retention period.

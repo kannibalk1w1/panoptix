@@ -98,11 +98,13 @@ class Recorder:
             return session
 
     def pause(self) -> None:
-        if self.active_session_id is not None:
-            self._pause_event.set()
+        with self._lock:
+            if self.active_session_id is not None:
+                self._pause_event.set()
 
     def resume(self) -> None:
-        self._pause_event.clear()
+        with self._lock:
+            self._pause_event.clear()
 
     def capture_click(self, x: int, y: int) -> dict[str, Any]:
         with self._lock:
@@ -133,19 +135,22 @@ class Recorder:
 
     def capture_periodic(self) -> dict[str, Any]:
         with self._lock:
-            self._require_active()
-            session_id = self.active_session_id
-            filename = self.store.next_screenshot_name(session_id)
-            screenshot = self.capture.capture(self.store.screenshot_dir(session_id), filename)
-            event = {
-                "type": "periodic",
-                "timestamp": now_iso(),
-                "screenshot": screenshot.name,
-                "title": "",
-                "staff_note": "",
-                "highlight": False,
-            }
-            return self.store.add_event(session_id, event)["events"][-1]
+            return self._capture_periodic_locked()
+
+    def _capture_periodic_locked(self) -> dict[str, Any]:
+        self._require_active()
+        session_id = self.active_session_id
+        filename = self.store.next_screenshot_name(session_id)
+        screenshot = self.capture.capture(self.store.screenshot_dir(session_id), filename)
+        event = {
+            "type": "periodic",
+            "timestamp": now_iso(),
+            "screenshot": screenshot.name,
+            "title": "",
+            "staff_note": "",
+            "highlight": False,
+        }
+        return self.store.add_event(session_id, event)["events"][-1]
 
     def _require_active(self) -> None:
         if self.active_session_id is None:
@@ -153,9 +158,10 @@ class Recorder:
 
     def _observation_loop(self, interval: float) -> None:
         while not self._stop_event.wait(interval):
-            if self._pause_event.is_set():
-                continue
-            try:
-                self.capture_periodic()
-            except RuntimeError:
-                break
+            with self._lock:
+                if self._pause_event.is_set():
+                    continue
+                try:
+                    self._capture_periodic_locked()
+                except RuntimeError:
+                    break

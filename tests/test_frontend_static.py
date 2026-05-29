@@ -31,6 +31,13 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("export-pack", app_js)
         self.assertIn("exportEvidencePack", app_js)
 
+    def test_review_ui_exposes_evidence_pack_verification(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("Verify evidence pack", app_js)
+        self.assertIn("verify-pack", app_js)
+        self.assertIn("verifyEvidencePack", app_js)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image
 
 from panoptix_app.capture import PlaceholderCapture
+from panoptix_app.exporter import EvidencePackExporter
 from panoptix_app.recorder import Recorder
 from panoptix_app.server import create_handler
 from panoptix_app.storage import SessionStore
@@ -118,6 +119,38 @@ class ApiEventUpdateTests(unittest.TestCase):
                 self.assertEqual(result["event"]["marker"]["shape"], "square")
                 with Image.open(screenshot_dir / "001.png") as image:
                     self.assertNotEqual(image.getpixel((30, 30)), (255, 255, 255))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_verify_pack_endpoint_reports_valid_pack(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SessionStore(root)
+            session = store.create_session("evidence", {}, {})
+            screenshot = PlaceholderCapture().capture(store.screenshot_dir(session["id"]), "001.png")
+            store.add_event(
+                session["id"],
+                {
+                    "type": "click",
+                    "timestamp": "2026-05-28T10:00:00",
+                    "screenshot": screenshot.name,
+                    "title": "Verified route",
+                },
+            )
+            EvidencePackExporter(root).export(session["id"])
+            handler = create_handler(root, store, Recorder(store, PlaceholderCapture()))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base_url = f"http://127.0.0.1:{server.server_address[1]}"
+            try:
+                result = self.post_json(f"{base_url}/api/sessions/{session['id']}/verify-pack", {})
+
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["failure_count"], 0)
+                self.assertGreater(result["checked"], 0)
             finally:
                 server.shutdown()
                 server.server_close()
