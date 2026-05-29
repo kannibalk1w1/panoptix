@@ -65,6 +65,39 @@ class RedactionTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
+    def test_redact_manual_box_endpoint_records_manual_redaction(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SessionStore(root)
+            session = store.create_session("evidence", {}, {})
+            screenshot_dir = store.screenshot_dir(session["id"])
+            Image.new("RGB", (100, 100), "white").save(screenshot_dir / "001.png")
+            store.add_event(session["id"], {"type": "click", "timestamp": "now", "screenshot": "001.png"})
+            handler = create_handler(root, store, Recorder(store, PlaceholderCapture()))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base_url = f"http://127.0.0.1:{server.server_address[1]}"
+            try:
+                payload = self.post_json(
+                    f"{base_url}/api/sessions/{session['id']}/events/1/redact",
+                    {"rect": {"x": 20, "y": 30, "width": 25, "height": 15}},
+                )
+
+                redaction = payload["event"]["redactions"][0]
+                self.assertEqual(redaction["preset"], "manual")
+                self.assertEqual(redaction["x"], 20)
+                self.assertEqual(redaction["y"], 30)
+                self.assertEqual(redaction["width"], 25)
+                self.assertEqual(redaction["height"], 15)
+                with Image.open(screenshot_dir / "001.png") as image:
+                    self.assertEqual(image.getpixel((30, 35)), (0, 0, 0))
+                    self.assertEqual(image.getpixel((10, 10)), (255, 255, 255))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
     def test_restore_original_screenshot_removes_redactions(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -87,7 +87,7 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
                         session_id,
                         event_index,
                         rect=payload.get("rect"),
-                        preset=payload.get("preset") or "top_strip",
+                        preset=payload.get("preset"),
                     )
                     self._json(result)
                 elif path.startswith("/api/sessions/") and path.endswith("/marker"):

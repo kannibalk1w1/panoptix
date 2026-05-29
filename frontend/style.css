@@ -234,7 +234,8 @@ textarea {
   width: auto;
 }
 
-.marker-editor {
+.marker-editor,
+.redaction-editor {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
@@ -244,7 +245,8 @@ textarea {
   background: #121821;
 }
 
-.marker-editor button {
+.marker-editor button,
+.redaction-editor button {
   align-self: end;
 }
 

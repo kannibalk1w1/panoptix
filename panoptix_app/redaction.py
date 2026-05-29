@@ -42,13 +42,12 @@ def redact_event_screenshot(
 
     redaction = {
         "type": "black_box",
+        "preset": preset or "manual",
         "x": box[0],
         "y": box[1],
         "width": box[2] - box[0],
         "height": box[3] - box[1],
     }
-    if preset:
-        redaction["preset"] = preset
     event.setdefault("redactions", []).append(redaction)
     session = store.update_event(session_id, event_index, {"redactions": event["redactions"]})
     return {"session": session, "event": next(item for item in session["events"] if item.get("index") == event_index)}

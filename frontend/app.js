@@ -305,6 +305,9 @@ async function renderReview(sessionId) {
   app.querySelectorAll("[data-redact-top]").forEach((button) => {
     button.addEventListener("click", async () => redactTopStrip(sessionId, button.dataset.redactTop));
   });
+  app.querySelectorAll("[data-redact-box]").forEach((button) => {
+    button.addEventListener("click", async () => redactBox(sessionId, button.dataset.redactBox));
+  });
   app.querySelectorAll("[data-restore-original]").forEach((button) => {
     button.addEventListener("click", async () => restoreOriginal(sessionId, button.dataset.restoreOriginal));
   });
@@ -344,6 +347,7 @@ function renderEventEditor(sessionId, event) {
         <label>Tags <input data-field="tags" data-event="${event.index}" value="${escapeAttr(tags)}"></label>
         <label class="check-row"><input type="checkbox" data-field="highlight" data-event="${event.index}" ${checked}> Mark as highlight</label>
         <label class="check-row"><input type="checkbox" data-field="selected_for_export" data-event="${event.index}" ${selected}> Include in export</label>
+        ${renderRedactionBoxEditor(event)}
         ${markerEditor}
         <div class="actions">
           <button class="primary" data-save-event="${event.index}">Save evidence note</button>
@@ -353,6 +357,18 @@ function renderEventEditor(sessionId, event) {
         </div>
       </div>
     </article>
+  `;
+}
+
+function renderRedactionBoxEditor(event) {
+  return `
+    <div class="redaction-editor">
+      <label>X <input class="redaction-field" data-redaction-field="x" data-redaction-event="${event.index}" type="number" min="0" value="0"></label>
+      <label>Y <input class="redaction-field" data-redaction-field="y" data-redaction-event="${event.index}" type="number" min="0" value="0"></label>
+      <label>Width <input class="redaction-field" data-redaction-field="width" data-redaction-event="${event.index}" type="number" min="1" value="120"></label>
+      <label>Height <input class="redaction-field" data-redaction-field="height" data-redaction-event="${event.index}" type="number" min="1" value="40"></label>
+      <button class="secondary" data-redact-box="${event.index}" type="button">Apply redaction box</button>
+    </div>
   `;
 }
 
@@ -437,6 +453,27 @@ async function redactTopStrip(sessionId, eventIndex) {
     return;
   }
   await api.post(`/api/sessions/${sessionId}/events/${eventIndex}/redact`, { preset: "top_strip" });
+  await renderReview(sessionId);
+}
+
+async function redactBox(sessionId, eventIndex) {
+  const fields = app.querySelectorAll(`[data-redaction-event="${eventIndex}"]`);
+  const rect = {};
+  fields.forEach((field) => {
+    rect[field.dataset.redactionField] = Number(field.value);
+  });
+  if (!Number.isFinite(rect.x) || !Number.isFinite(rect.y) || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) {
+    alert("Redaction box needs valid numbers.");
+    return;
+  }
+  if (rect.width < 1 || rect.height < 1) {
+    alert("Redaction box width and height must be at least 1.");
+    return;
+  }
+  if (!confirm("Apply this black redaction box to the screenshot? A backup of the original is kept locally.")) {
+    return;
+  }
+  await api.post(`/api/sessions/${sessionId}/events/${eventIndex}/redact`, { rect });
   await renderReview(sessionId);
 }
 
