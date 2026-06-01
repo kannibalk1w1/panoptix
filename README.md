@@ -20,7 +20,7 @@ http://127.0.0.1:8765
 - Click-event capture API with screenshot storage and click coordinates.
 - Observation Mode with automatic periodic screenshots.
 - Session list.
-- Review workflow with notes, tags, highlights, selected export flags, redactions, and click marker styling.
+- Review workflow with search, filters, notes, tags, highlights, selected export flags, redactions, and click marker styling.
 - Self-contained HTML export.
 - Formal PDF export.
 - Evidence pack ZIP export and verification with HTML, PDF, selected clean/annotated screenshots, CSV manifest, JSON manifest, file sizes, and SHA-256 checksums.

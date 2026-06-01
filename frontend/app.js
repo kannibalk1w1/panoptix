@@ -5,6 +5,7 @@ let currentView = "home";
 let currentSessionId = null;
 let latestStatus = { active: false };
 let reviewFilter = "all";
+let reviewSearch = "";
 
 const api = {
   async get(path) {
@@ -260,7 +261,7 @@ async function renderReview(sessionId) {
   const session = data.session;
   const metadata = session.metadata || {};
   const events = session.events || [];
-  const visibleEvents = reviewFilter === "highlights" ? events.filter((event) => event.highlight) : events;
+  const visibleEvents = PanoptixReviewFilters.filterReviewEvents(events, reviewFilter, reviewSearch);
   const eventCards = visibleEvents.map((event) => renderEventEditor(session.id, event)).join("");
   app.innerHTML = `
     <section class="card">
@@ -277,12 +278,22 @@ async function renderReview(sessionId) {
       </div>
     </section>
     <section class="review-toolbar">
+      <label class="review-search">Search evidence
+        <input id="review-search" type="search" value="${escapeAttr(reviewSearch)}" placeholder="Search notes, quotes, tags, type">
+      </label>
+      <button class="secondary" id="apply-review-search">Apply search</button>
       <button class="secondary ${reviewFilter === "all" ? "selected" : ""}" data-review-filter="all">All screenshots</button>
       <button class="secondary ${reviewFilter === "highlights" ? "selected" : ""}" data-review-filter="highlights">Highlights only</button>
+      <button class="secondary ${reviewFilter === "selected" ? "selected" : ""}" data-review-filter="selected">Selected</button>
+      <button class="secondary ${reviewFilter === "unselected" ? "selected" : ""}" data-review-filter="unselected">Not selected</button>
+      <button class="secondary ${reviewFilter === "redacted" ? "selected" : ""}" data-review-filter="redacted">Redacted</button>
+      <button class="secondary ${reviewFilter === "clicks" ? "selected" : ""}" data-review-filter="clicks">Clicks</button>
+      <button class="secondary ${reviewFilter === "observations" ? "selected" : ""}" data-review-filter="observations">Observations</button>
       <button class="secondary" data-selection="all">Select all</button>
       <button class="secondary" data-selection="none">Select none</button>
       <button class="secondary" data-selection="highlights">Select highlights</button>
     </section>
+    <p class="muted review-count">${visibleEvents.length} of ${events.length} screenshots shown</p>
     <section class="review-list">
       ${eventCards || "<p class='muted'>No screenshots match this filter.</p>"}
     </section>
@@ -320,6 +331,17 @@ async function renderReview(sessionId) {
       reviewFilter = button.dataset.reviewFilter;
       await renderReview(sessionId);
     });
+  });
+  app.querySelector("#apply-review-search").addEventListener("click", async () => {
+    reviewSearch = app.querySelector("#review-search").value;
+    await renderReview(sessionId);
+  });
+  app.querySelector("#review-search").addEventListener("keydown", async (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    reviewSearch = event.target.value;
+    await renderReview(sessionId);
   });
   app.querySelectorAll("[data-selection]").forEach((button) => {
     button.addEventListener("click", async () => bulkSelectEvents(session, button.dataset.selection));

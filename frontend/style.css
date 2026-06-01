@@ -215,8 +215,19 @@ textarea {
 
 .review-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: end;
   gap: 10px;
   margin: 18px 0;
+}
+
+.review-search {
+  min-width: 260px;
+  flex: 1 1 320px;
+}
+
+.review-count {
+  margin: -6px 0 0;
 }
 
 .selected {

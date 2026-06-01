@@ -38,6 +38,20 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("verify-pack", app_js)
         self.assertIn("verifyEvidencePack", app_js)
 
+    def test_review_ui_exposes_search_and_filter_controls(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("review-search", app_js)
+        self.assertIn("data-review-filter=\"selected\"", app_js)
+        self.assertIn("data-review-filter=\"redacted\"", app_js)
+        self.assertIn("data-review-filter=\"clicks\"", app_js)
+        self.assertIn("filterReviewEvents", app_js)
+
+    def test_index_loads_review_filter_helper_before_app(self):
+        index_html = (Path(__file__).resolve().parents[1] / "frontend" / "index.html").read_text(encoding="utf-8")
+
+        self.assertLess(index_html.index("/reviewFilters.js"), index_html.index("/app.js"))
+
 
 if __name__ == "__main__":
     unittest.main()
