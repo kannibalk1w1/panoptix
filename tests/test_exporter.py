@@ -84,6 +84,20 @@ class HtmlExporterTests(unittest.TestCase):
             self.assertTrue(output["pdf"].exists())
             self.assertGreater(output["pdf"].stat().st_size, 500)
 
+    def test_session_exporter_uses_configured_export_directory(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            export_root = root / "custom_exports"
+            store = SessionStore(root)
+            store.settings_path = root / "settings.json"
+            store.settings_path.write_text(json.dumps({"export_directory": str(export_root)}), encoding="utf-8")
+            session = store.create_session("evidence", {"activity": "Custom export"}, {})
+
+            output = SessionExporter(root).export(session["id"])
+
+            self.assertEqual(output["html"].parent, export_root / session["id"])
+            self.assertEqual(output["pdf"].parent, export_root / session["id"])
+
     def test_exports_include_staff_confirmation_and_page_footer(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

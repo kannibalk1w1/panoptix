@@ -2,3 +2,4 @@ mss
 Pillow
 pynput
 fpdf2
+pystray

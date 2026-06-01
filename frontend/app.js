@@ -226,7 +226,11 @@ function renderActiveBanner() {
   if (!latestStatus.active) {
     return "";
   }
-  const mode = latestStatus.mode === "observation" ? "Observation Mode" : "Evidence Capture";
+  const mode = latestStatus.mode === "observation"
+    ? "Observation Mode"
+    : latestStatus.mode === "background"
+      ? "Background Capture"
+      : "Evidence Capture";
   const elapsed = formatElapsed(latestStatus.elapsed_seconds || 0);
   const fallback = latestStatus.hook_error ? `<p class="muted">${escapeHtml(latestStatus.hook_error)}</p>` : "";
   const paused = latestStatus.paused ? "Paused" : "Active";
@@ -570,8 +574,20 @@ async function renderSettings() {
     <form class="card form" id="settings-form">
       <h2>Settings</h2>
       <label>Observation screenshot interval seconds <input name="observation_interval_seconds" type="number" min="5" value="${escapeAttr(settings.observation_interval_seconds)}"></label>
+      <h2>Scheduled passive capture</h2>
+      <label class="check-row"><input name="background_enabled" type="checkbox" ${settings.background_enabled ? "checked" : ""}> Start passive capture during the daily window</label>
+      <label>Daily start time <input name="background_start_time" type="time" value="${escapeAttr(settings.background_start_time)}"></label>
+      <label>Daily end time <input name="background_end_time" type="time" value="${escapeAttr(settings.background_end_time)}"></label>
+      <label>Passive screenshot interval seconds <input name="background_interval_seconds" type="number" min="1" value="${escapeAttr(settings.background_interval_seconds)}"></label>
+      <label class="check-row"><input name="background_change_detection" type="checkbox" ${settings.background_change_detection ? "checked" : ""}> Skip unchanged passive screenshots</label>
+      <label>Change sensitivity threshold <input name="background_change_threshold" type="number" min="1" value="${escapeAttr(settings.background_change_threshold)}"></label>
+      <h2>Manual capture hotkey</h2>
+      <label class="check-row"><input name="launch_on_startup" type="checkbox" ${settings.launch_on_startup ? "checked" : ""}> Open Panoptix with Windows startup</label>
+      <label class="check-row"><input name="manual_hotkey_enabled" type="checkbox" ${settings.manual_hotkey_enabled ? "checked" : ""}> Enable manual CYP capture hotkey</label>
+      <label>Hotkey <input name="manual_hotkey" value="${escapeAttr(settings.manual_hotkey)}" placeholder="<ctrl>+<alt>+p"></label>
       <label>Retention days <input name="retention_days" type="number" min="1" value="${escapeAttr(settings.retention_days)}"></label>
       <label>Storage warning MB <input name="storage_warning_mb" type="number" min="1" value="${escapeAttr(settings.storage_warning_mb)}"></label>
+      <label>Export folder <input name="export_directory" value="${escapeAttr(settings.export_directory)}" placeholder="Leave blank for Panoptix local exports"></label>
       <label>Default evidence purpose
         <select name="default_evidence_purpose">
           ${renderPurposeOption("UAS evidence", settings.default_evidence_purpose)}
@@ -601,8 +617,18 @@ async function renderSettings() {
     const form = new FormData(event.currentTarget);
     await api.patch("/api/settings", {
       observation_interval_seconds: Number(form.get("observation_interval_seconds")),
+      background_enabled: form.get("background_enabled") === "on",
+      background_start_time: form.get("background_start_time"),
+      background_end_time: form.get("background_end_time"),
+      background_interval_seconds: Number(form.get("background_interval_seconds")),
+      background_change_detection: form.get("background_change_detection") === "on",
+      background_change_threshold: Number(form.get("background_change_threshold")),
+      manual_hotkey_enabled: form.get("manual_hotkey_enabled") === "on",
+      manual_hotkey: form.get("manual_hotkey"),
+      launch_on_startup: form.get("launch_on_startup") === "on",
       retention_days: Number(form.get("retention_days")),
       storage_warning_mb: Number(form.get("storage_warning_mb")),
+      export_directory: form.get("export_directory"),
       default_evidence_purpose: form.get("default_evidence_purpose"),
       marker_shape: form.get("marker_shape"),
       marker_color: form.get("marker_color"),

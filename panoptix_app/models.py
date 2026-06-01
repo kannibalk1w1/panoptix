@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 
-VALID_MODES = {"evidence", "observation"}
+VALID_MODES = {"evidence", "observation", "background"}
 
 
 def now_iso() -> str:

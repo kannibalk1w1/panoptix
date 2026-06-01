@@ -11,6 +11,11 @@ from panoptix_app.recorder import Recorder
 from panoptix_app.storage import SessionStore
 
 
+class ConstantCapture:
+    def capture(self, output_dir: Path, filename: str, marker=None) -> Path:
+        return PlaceholderCapture().capture(output_dir, filename)
+
+
 class RecorderTests(unittest.TestCase):
     def test_evidence_click_records_coordinates(self):
         with TemporaryDirectory() as tmp:
@@ -96,6 +101,37 @@ class RecorderTests(unittest.TestCase):
             final_count = len(store.load_session(session["id"])["events"])
             self.assertEqual(count_while_paused, count_at_pause)
             self.assertGreater(final_count, count_while_paused)
+
+    def test_background_capture_skips_unchanged_frames(self):
+        with TemporaryDirectory() as tmp:
+            store = SessionStore(Path(tmp))
+            recorder = Recorder(store, ConstantCapture())
+            session = recorder.start("background", {}, {"change_detection": True, "change_threshold": 4})
+
+            first = recorder.capture_periodic()
+            second = recorder.capture_periodic()
+            status = recorder.status()
+            recorder.stop()
+
+            loaded = store.load_session(session["id"])
+            self.assertEqual(first["type"], "background")
+            self.assertIsNone(second)
+            self.assertEqual(len(loaded["events"]), 1)
+            self.assertEqual(status["skipped_unchanged"], 1)
+
+    def test_manual_hotkey_capture_records_autonomy_event(self):
+        with TemporaryDirectory() as tmp:
+            store = SessionStore(Path(tmp))
+            recorder = Recorder(store, PlaceholderCapture())
+            session = recorder.start("background", {}, {"change_detection": True})
+
+            event = recorder.capture_manual_hotkey()
+            recorder.stop()
+
+            loaded = store.load_session(session["id"])
+            self.assertEqual(event["type"], "manual_hotkey")
+            self.assertEqual(len(loaded["events"]), 1)
+            self.assertEqual(loaded["events"][0]["title"], "Manual CYP capture")
 
 
 if __name__ == "__main__":

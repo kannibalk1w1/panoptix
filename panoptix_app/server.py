@@ -9,16 +9,26 @@ from urllib.parse import unquote, urlparse
 
 from .annotation import update_event_marker
 from .app_paths import get_project_root
+from .background import BackgroundScheduler
 from .exporter import EvidencePackExporter, EvidencePackVerifier, ImageZipExporter, SessionExporter
+from .hotkeys import HotkeyService
 from .redaction import redact_event_screenshot, restore_original_screenshot
 from .recorder import Recorder
 from .retention import cleanup_old_sessions
 from .settings import SettingsStore
+from .startup import StartupManager
 from .storage import SessionStore
 from .storage_usage import get_storage_usage
+from .tray import start_tray
 
 
-def create_handler(root: Path, store: SessionStore, recorder: Recorder):
+def create_handler(
+    root: Path,
+    store: SessionStore,
+    recorder: Recorder,
+    hotkeys: HotkeyService | None = None,
+    startup: StartupManager | None = None,
+):
     root = Path(root)
     frontend_dir = get_project_root() / "frontend"
     settings_store = SettingsStore(root)
@@ -119,7 +129,12 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
             path = urlparse(self.path).path
             try:
                 if path == "/api/settings":
-                    self._json({"settings": settings_store.update(self._payload())})
+                    updated_settings = settings_store.update(self._payload())
+                    if startup is not None:
+                        startup.set_enabled(bool(updated_settings.get("launch_on_startup")))
+                    self._json({"settings": updated_settings})
+                    if hotkeys is not None:
+                        hotkeys.restart()
                 elif path.startswith("/api/sessions/") and "/events/" in path:
                     parts = path.split("/")
                     session_id = unquote(parts[3])
@@ -213,8 +228,22 @@ def create_handler(root: Path, store: SessionStore, recorder: Recorder):
 def run_server(root: Path, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     store = SessionStore(root)
     recorder = Recorder(store)
-    handler = create_handler(root, store, recorder)
+    settings_store = SettingsStore(root)
+    scheduler = BackgroundScheduler(recorder, settings_store)
+    hotkeys = HotkeyService(settings_store, recorder)
+    startup = StartupManager()
+    scheduler.start()
+    hotkeys.start()
+    startup.set_enabled(bool(settings_store.load().get("launch_on_startup")))
+    handler = create_handler(root, store, recorder, hotkeys, startup)
     server = ThreadingHTTPServer((host, port), handler)
+    tray_icon = start_tray(f"http://{host}:{server.server_address[1]}", recorder, settings_store, server)
     print(f"Panoptix running at http://{host}:{server.server_address[1]}")
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        if tray_icon is not None:
+            tray_icon.stop()
+        hotkeys.stop()
+        scheduler.stop()
     return server

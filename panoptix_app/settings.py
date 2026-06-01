@@ -7,9 +7,19 @@ from typing import Any
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "observation_interval_seconds": 60,
+    "background_enabled": False,
+    "background_start_time": "09:00",
+    "background_end_time": "15:30",
+    "background_interval_seconds": 5,
+    "background_change_detection": True,
+    "background_change_threshold": 4,
+    "manual_hotkey_enabled": True,
+    "manual_hotkey": "<ctrl>+<alt>+p",
+    "launch_on_startup": False,
     "retention_days": 30,
     "storage_warning_mb": 500,
     "default_evidence_purpose": "UAS evidence",
+    "export_directory": "",
     "marker_shape": "circle",
     "marker_color": "#ef233c",
     "marker_size": 32,
@@ -39,8 +49,20 @@ class SettingsStore:
 
     @staticmethod
     def _coerce(key: str, value: Any) -> Any:
+        if key in {"background_enabled", "background_change_detection", "manual_hotkey_enabled", "launch_on_startup"}:
+            if isinstance(value, str):
+                return value.strip().lower() in {"1", "true", "yes", "on"}
+            return bool(value)
         if key == "marker_size":
             return max(6, int(value))
-        if key in {"observation_interval_seconds", "retention_days", "storage_warning_mb", "marker_size", "marker_stroke"}:
+        if key in {
+            "observation_interval_seconds",
+            "background_interval_seconds",
+            "background_change_threshold",
+            "retention_days",
+            "storage_warning_mb",
+            "marker_size",
+            "marker_stroke",
+        }:
             return max(1, int(value))
         return str(value)

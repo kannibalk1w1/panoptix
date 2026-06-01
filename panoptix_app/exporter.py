@@ -9,11 +9,27 @@ from io import StringIO
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED, BadZipFile
 
+from .settings import SettingsStore
 from .storage import SessionStore
 
 
 def selected_events(session: dict) -> list[dict]:
     return [event for event in session.get("events", []) if event.get("selected_for_export", True)]
+
+
+def export_output_dir(root: Path, session_id: str) -> Path:
+    configured = SettingsStore(root).load().get("export_directory", "")
+    if configured:
+        output_dir = Path(configured).expanduser() / session_id
+    else:
+        output_dir = Path(root) / "exports" / session_id
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir
+    except OSError:
+        fallback = Path(root) / "exports" / session_id
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
 
 
 class HtmlExporter:
@@ -23,8 +39,7 @@ class HtmlExporter:
 
     def export(self, session_id: str) -> Path:
         session = self.store.load_session(session_id)
-        output_dir = self.root / "exports" / session_id
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = export_output_dir(self.root, session_id)
         output = output_dir / "evidence-report.html"
         output.write_text(self._render(session), encoding="utf-8")
         return output
@@ -135,8 +150,7 @@ class PdfExporter:
             raise RuntimeError("fpdf2 is not installed; PDF export is unavailable") from exc
 
         session = self.store.load_session(session_id)
-        output_dir = self.root / "exports" / session_id
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = export_output_dir(self.root, session_id)
         output = output_dir / "evidence-report.pdf"
         metadata = session.get("metadata", {})
         title = metadata.get("activity") or "Panoptix Evidence Report"
@@ -333,8 +347,7 @@ class ImageZipExporter:
 
     def export(self, session_id: str, variant: str = "annotated") -> Path:
         session = self.store.load_session(session_id)
-        output_dir = self.root / "exports" / session_id
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = export_output_dir(self.root, session_id)
         output = output_dir / f"selected-images-{variant}.zip"
         events = selected_events(session)
         with ZipFile(output, "w", ZIP_DEFLATED) as archive:
@@ -376,8 +389,7 @@ class EvidencePackExporter:
 
     def export(self, session_id: str) -> Path:
         session = self.store.load_session(session_id)
-        output_dir = self.root / "exports" / session_id
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = export_output_dir(self.root, session_id)
         output = output_dir / "evidence-pack.zip"
         report_paths = SessionExporter(self.root).export(session_id)
         events = selected_events(session)
@@ -457,7 +469,7 @@ class EvidencePackVerifier:
 
     def verify(self, session_id: str) -> dict:
         self.store.load_session(session_id)
-        pack_path = self.root / "exports" / session_id / "evidence-pack.zip"
+        pack_path = export_output_dir(self.root, session_id) / "evidence-pack.zip"
         failures = []
         checked = 0
         try:

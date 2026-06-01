@@ -22,13 +22,23 @@ class SettingsTests(unittest.TestCase):
             store = SettingsStore(Path(tmp))
 
             defaults = store.load()
-            updated = store.update({"observation_interval_seconds": 120, "retention_days": 14})
+            updated = store.update(
+                {
+                    "observation_interval_seconds": 120,
+                    "retention_days": 14,
+                    "background_enabled": "false",
+                    "manual_hotkey_enabled": "true",
+                }
+            )
             reloaded = SettingsStore(Path(tmp)).load()
 
             self.assertEqual(defaults["observation_interval_seconds"], 60)
             self.assertEqual(defaults["marker_shape"], "circle")
             self.assertEqual(defaults["marker_color"], "#ef233c")
+            self.assertEqual(defaults["export_directory"], "")
             self.assertEqual(updated["observation_interval_seconds"], 120)
+            self.assertFalse(updated["background_enabled"])
+            self.assertTrue(updated["manual_hotkey_enabled"])
             self.assertEqual(reloaded["retention_days"], 14)
             self.assertEqual(reloaded["storage_warning_mb"], 500)
 
@@ -51,6 +61,7 @@ class SettingsTests(unittest.TestCase):
                         "marker_shape": "crosshair",
                         "marker_size": 44,
                         "marker_stroke": 5,
+                        "export_directory": str(root / "exports_out"),
                     },
                 )
 
@@ -60,6 +71,7 @@ class SettingsTests(unittest.TestCase):
                 self.assertEqual(updated["settings"]["marker_shape"], "crosshair")
                 self.assertEqual(updated["settings"]["marker_size"], 44)
                 self.assertEqual(updated["settings"]["marker_stroke"], 5)
+                self.assertEqual(updated["settings"]["export_directory"], str(root / "exports_out"))
             finally:
                 server.shutdown()
                 server.server_close()

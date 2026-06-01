@@ -52,6 +52,30 @@ class FrontendStaticTests(unittest.TestCase):
 
         self.assertLess(index_html.index("/reviewFilters.js"), index_html.index("/app.js"))
 
+    def test_settings_ui_exposes_export_directory(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("Export folder", app_js)
+        self.assertIn("export_directory", app_js)
+
+    def test_settings_ui_exposes_background_capture_controls(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("Scheduled passive capture", app_js)
+        self.assertIn("background_enabled", app_js)
+        self.assertIn("background_start_time", app_js)
+        self.assertIn("background_end_time", app_js)
+        self.assertIn("background_interval_seconds", app_js)
+        self.assertIn("background_change_detection", app_js)
+
+    def test_settings_ui_exposes_manual_hotkey_controls(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("Manual capture hotkey", app_js)
+        self.assertIn("manual_hotkey_enabled", app_js)
+        self.assertIn("manual_hotkey", app_js)
+        self.assertIn("launch_on_startup", app_js)
+
 
 if __name__ == "__main__":
     unittest.main()
