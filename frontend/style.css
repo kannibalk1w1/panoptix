@@ -115,6 +115,21 @@ h1, h2, h3, p {
   padding: 18px;
 }
 
+.system-status {
+  margin-bottom: 16px;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.status-warning {
+  margin-bottom: 0;
+  color: #ffd166;
+}
+
 .form {
   display: grid;
   gap: 14px;

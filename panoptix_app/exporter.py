@@ -17,19 +17,53 @@ def selected_events(session: dict) -> list[dict]:
     return [event for event in session.get("events", []) if event.get("selected_for_export", True)]
 
 
-def export_output_dir(root: Path, session_id: str) -> Path:
+def _local_export_dir(root: Path, session_id: str | None = None) -> Path:
+    output_dir = Path(root) / "exports"
+    if session_id:
+        output_dir = output_dir / session_id
+    return output_dir
+
+
+def _configured_export_dir(configured: str, session_id: str | None = None) -> Path:
+    output_dir = Path(configured).expanduser()
+    if session_id:
+        output_dir = output_dir / session_id
+    return output_dir
+
+
+def export_destination_status(root: Path, session_id: str | None = None) -> dict:
     configured = SettingsStore(root).load().get("export_directory", "")
     if configured:
-        output_dir = Path(configured).expanduser() / session_id
+        output_dir = _configured_export_dir(configured, session_id)
     else:
-        output_dir = Path(root) / "exports" / session_id
+        output_dir = _local_export_dir(root, session_id)
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
-        return output_dir
-    except OSError:
-        fallback = Path(root) / "exports" / session_id
+        return {
+            "path": str(output_dir),
+            "configured_directory": configured,
+            "requested_path": str(output_dir),
+            "using_configured_directory": bool(configured),
+            "fallback_used": False,
+            "writable": True,
+            "warning": "",
+        }
+    except OSError as exc:
+        fallback = _local_export_dir(root, session_id)
         fallback.mkdir(parents=True, exist_ok=True)
-        return fallback
+        return {
+            "path": str(fallback),
+            "configured_directory": configured,
+            "requested_path": str(output_dir),
+            "using_configured_directory": False,
+            "fallback_used": True,
+            "writable": False,
+            "warning": f"Configured export folder is not usable, so Panoptix will use local exports instead: {exc}",
+        }
+
+
+def export_output_dir(root: Path, session_id: str) -> Path:
+    return Path(export_destination_status(root, session_id)["path"])
 
 
 class HtmlExporter:

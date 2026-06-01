@@ -76,6 +76,15 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("manual_hotkey", app_js)
         self.assertIn("launch_on_startup", app_js)
 
+    def test_dashboard_surfaces_background_system_status(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("renderSystemStatus", app_js)
+        self.assertIn("Skipped unchanged frames", app_js)
+        self.assertIn("Export folder warning", app_js)
+        self.assertIn("Windows startup", app_js)
+        self.assertIn("Manual hotkey", app_js)
+
 
 if __name__ == "__main__":
     unittest.main()

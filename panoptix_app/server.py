@@ -9,8 +9,14 @@ from urllib.parse import unquote, urlparse
 
 from .annotation import update_event_marker
 from .app_paths import get_project_root
-from .background import BackgroundScheduler
-from .exporter import EvidencePackExporter, EvidencePackVerifier, ImageZipExporter, SessionExporter
+from .background import BackgroundScheduler, daily_window_is_active
+from .exporter import (
+    EvidencePackExporter,
+    EvidencePackVerifier,
+    ImageZipExporter,
+    SessionExporter,
+    export_destination_status,
+)
 from .hotkeys import HotkeyService
 from .redaction import redact_event_screenshot, restore_original_screenshot
 from .recorder import Recorder
@@ -33,12 +39,37 @@ def create_handler(
     frontend_dir = get_project_root() / "frontend"
     settings_store = SettingsStore(root)
 
+    def app_status() -> dict[str, Any]:
+        settings = settings_store.load()
+        status = recorder.status()
+        status["background"] = {
+            "enabled": bool(settings.get("background_enabled")),
+            "window": f"{settings.get('background_start_time')}-{settings.get('background_end_time')}",
+            "start_time": settings.get("background_start_time"),
+            "end_time": settings.get("background_end_time"),
+            "interval_seconds": settings.get("background_interval_seconds"),
+            "change_detection": bool(settings.get("background_change_detection")),
+            "change_threshold": settings.get("background_change_threshold"),
+            "window_active": daily_window_is_active(settings),
+        }
+        status["hotkey"] = {
+            "enabled": bool(settings.get("manual_hotkey_enabled")),
+            "shortcut": settings.get("manual_hotkey"),
+            "error": getattr(hotkeys, "error", None) if hotkeys is not None else None,
+        }
+        status["startup"] = {
+            "requested": bool(settings.get("launch_on_startup")),
+            "installed": startup.is_enabled() if startup is not None else False,
+        }
+        status["export_destination"] = export_destination_status(root)
+        return status
+
     class PanoptixHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             path = urlparse(self.path).path
             try:
                 if path == "/api/status":
-                    self._json(recorder.status())
+                    self._json(app_status())
                 elif path == "/api/settings":
                     self._json({"settings": settings_store.load()})
                 elif path == "/api/storage":

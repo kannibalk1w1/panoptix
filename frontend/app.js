@@ -42,6 +42,9 @@ async function refreshStatus() {
   const status = await api.get("/api/status");
   latestStatus = status;
   statusPill.textContent = status.active ? `${status.mode} recording - ${status.event_count} screenshots` : "Idle";
+  if (status.active && status.mode === "background" && status.skipped_unchanged) {
+    statusPill.textContent += ` - ${status.skipped_unchanged} skipped`;
+  }
   if (status.hook_error) {
     statusPill.textContent += " - manual fallback";
   }
@@ -78,6 +81,7 @@ function renderHome() {
   title.textContent = "Home";
   app.innerHTML = `
     ${renderActiveBanner()}
+    ${renderSystemStatus()}
     <div class="grid">
       <section class="card">
         <h2>Evidence Capture</h2>
@@ -233,6 +237,9 @@ function renderActiveBanner() {
       : "Evidence Capture";
   const elapsed = formatElapsed(latestStatus.elapsed_seconds || 0);
   const fallback = latestStatus.hook_error ? `<p class="muted">${escapeHtml(latestStatus.hook_error)}</p>` : "";
+  const skipped = latestStatus.mode === "background"
+    ? `<p class="muted">Skipped unchanged frames: ${escapeHtml(latestStatus.skipped_unchanged || 0)}</p>`
+    : "";
   const paused = latestStatus.paused ? "Paused" : "Active";
   const pauseButton = latestStatus.mode === "observation"
     ? `<button class="secondary" id="banner-pause">${latestStatus.paused ? "Resume" : "Pause"}</button>`
@@ -242,12 +249,54 @@ function renderActiveBanner() {
       <div>
         <h2>${escapeHtml(mode)} ${escapeHtml(paused)}</h2>
         <p>${escapeHtml(elapsed)} elapsed - ${escapeHtml(latestStatus.event_count || 0)} screenshots captured</p>
+        ${skipped}
         ${fallback}
       </div>
       <div class="row-actions">
         ${pauseButton}
         <button class="danger" id="banner-stop">Stop recording</button>
       </div>
+    </section>
+  `;
+}
+
+function renderSystemStatus() {
+  const background = latestStatus.background || {};
+  const hotkey = latestStatus.hotkey || {};
+  const startup = latestStatus.startup || {};
+  const exportDestination = latestStatus.export_destination || {};
+  const backgroundState = background.enabled
+    ? (background.window_active ? "Capturing window is active" : "Waiting for daily window")
+    : "Disabled";
+  const changeDetection = background.change_detection ? "skipping unchanged frames" : "saving every frame";
+  const exportWarning = exportDestination.warning
+    ? `<p class="status-warning"><strong>Export folder warning</strong>: ${escapeHtml(exportDestination.warning)}</p>`
+    : `<p class="muted">Export folder: ${escapeHtml(exportDestination.path || "Panoptix local exports")}</p>`;
+  const hotkeyStatus = hotkey.enabled
+    ? `${hotkey.shortcut || "not set"}${hotkey.error ? ` - ${hotkey.error}` : ""}`
+    : "Disabled";
+  return `
+    <section class="card system-status">
+      <h2>Background Status</h2>
+      <div class="status-grid">
+        <div>
+          <strong>Scheduled passive capture</strong>
+          <p class="muted">${escapeHtml(backgroundState)} - ${escapeHtml(background.window || "daily window not set")} - ${escapeHtml(background.interval_seconds || 5)}s, ${escapeHtml(changeDetection)}</p>
+        </div>
+        <div>
+          <strong>Skipped unchanged frames</strong>
+          <p class="muted">${escapeHtml(latestStatus.skipped_unchanged || 0)}</p>
+        </div>
+        <div>
+          <strong>Manual hotkey</strong>
+          <p class="muted">${escapeHtml(hotkeyStatus)}</p>
+        </div>
+        <div>
+          <strong>Windows startup</strong>
+          <p class="muted">${startup.requested ? "Requested" : "Off"} - ${startup.installed ? "installed" : "not installed"}</p>
+        </div>
+      </div>
+      ${exportWarning}
     </section>
   `;
 }
@@ -571,6 +620,7 @@ async function renderSettings() {
         <button class="danger" id="cleanup-retention">Delete sessions older than retention period</button>
       </div>
     </section>
+    ${renderSystemStatus()}
     <form class="card form" id="settings-form">
       <h2>Settings</h2>
       <label>Observation screenshot interval seconds <input name="observation_interval_seconds" type="number" min="5" value="${escapeAttr(settings.observation_interval_seconds)}"></label>

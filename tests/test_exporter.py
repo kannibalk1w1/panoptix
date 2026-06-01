@@ -9,7 +9,14 @@ import warnings
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from panoptix_app.capture import PlaceholderCapture
-from panoptix_app.exporter import EvidencePackExporter, EvidencePackVerifier, HtmlExporter, ImageZipExporter, SessionExporter
+from panoptix_app.exporter import (
+    EvidencePackExporter,
+    EvidencePackVerifier,
+    HtmlExporter,
+    ImageZipExporter,
+    SessionExporter,
+    export_destination_status,
+)
 from panoptix_app.storage import SessionStore
 
 
@@ -97,6 +104,25 @@ class HtmlExporterTests(unittest.TestCase):
 
             self.assertEqual(output["html"].parent, export_root / session["id"])
             self.assertEqual(output["pdf"].parent, export_root / session["id"])
+
+    def test_export_destination_status_reports_fallback_when_configured_path_is_unusable(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            unusable_export_root = root / "not_a_directory"
+            unusable_export_root.write_text("file blocks directory creation", encoding="utf-8")
+            store = SessionStore(root)
+            store.settings_path = root / "settings.json"
+            store.settings_path.write_text(
+                json.dumps({"export_directory": str(unusable_export_root)}),
+                encoding="utf-8",
+            )
+
+            status = export_destination_status(root, "session-1")
+
+            self.assertTrue(status["fallback_used"])
+            self.assertFalse(status["writable"])
+            self.assertEqual(Path(status["path"]), root / "exports" / "session-1")
+            self.assertIn("not usable", status["warning"])
 
     def test_exports_include_staff_confirmation_and_page_footer(self):
         with TemporaryDirectory() as tmp:
