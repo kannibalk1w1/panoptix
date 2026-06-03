@@ -130,6 +130,15 @@ h1, h2, h3, p {
   color: #ffd166;
 }
 
+.privacy-check {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0f141b;
+  color: var(--text);
+}
+
 .form {
   display: grid;
   gap: 14px;

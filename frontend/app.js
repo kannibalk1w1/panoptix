@@ -320,6 +320,10 @@ async function renderReview(sessionId) {
     <section class="card">
       <h2>${escapeHtml(metadata.activity || session.id)}</h2>
       <p class="muted">${escapeHtml(session.mode)} - ${escapeHtml(session.started)} - ${events.length} screenshots</p>
+      <label class="check-row privacy-check">
+        <input id="privacy-review-confirmed" type="checkbox">
+        Personal data check: I have checked selected screenshots for personal data before submission.
+      </label>
       <div class="actions">
         <button class="primary" id="export-session">Export HTML</button>
         <button class="secondary" id="export-pack">Export evidence pack</button>
@@ -352,10 +356,7 @@ async function renderReview(sessionId) {
     </section>
   `;
   app.querySelector("#back-sessions").addEventListener("click", renderSessions);
-  app.querySelector("#export-session").addEventListener("click", async () => {
-    const result = await api.post(`/api/sessions/${sessionId}/export`);
-    alert(`Exported HTML: ${result.html}\nExported PDF: ${result.pdf}`);
-  });
+  app.querySelector("#export-session").addEventListener("click", async () => exportSession(sessionId));
   app.querySelector("#export-pack").addEventListener("click", async () => exportEvidencePack(sessionId));
   app.querySelector("#verify-pack").addEventListener("click", async () => verifyEvidencePack(sessionId));
   app.querySelector("#export-annotated-images").addEventListener("click", async () => exportImages(sessionId, "annotated"));
@@ -518,12 +519,36 @@ async function bulkSelectEvents(session, mode) {
   await renderReview(session.id);
 }
 
+function requirePrivacyReview() {
+  const checkbox = app.querySelector("#privacy-review-confirmed");
+  if (checkbox?.checked) {
+    return true;
+  }
+  alert("Before exporting, check selected screenshots for personal data and tick the Personal data check box.");
+  checkbox?.focus();
+  return false;
+}
+
+async function exportSession(sessionId) {
+  if (!requirePrivacyReview()) {
+    return;
+  }
+  const result = await api.post(`/api/sessions/${sessionId}/export`);
+  alert(`Exported HTML: ${result.html}\nExported PDF: ${result.pdf}`);
+}
+
 async function exportImages(sessionId, variant) {
+  if (!requirePrivacyReview()) {
+    return;
+  }
   const result = await api.post(`/api/sessions/${sessionId}/export-images`, { variant });
   alert(`Exported image ZIP: ${result.zip}`);
 }
 
 async function exportEvidencePack(sessionId) {
+  if (!requirePrivacyReview()) {
+    return;
+  }
   const result = await api.post(`/api/sessions/${sessionId}/export-pack`, {});
   alert(`Exported evidence pack: ${result.zip}`);
 }

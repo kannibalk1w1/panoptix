@@ -85,6 +85,14 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("Windows startup", app_js)
         self.assertIn("Manual hotkey", app_js)
 
+    def test_review_exports_require_personal_data_acknowledgement(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("Personal data check", app_js)
+        self.assertIn("privacy-review-confirmed", app_js)
+        self.assertIn("requirePrivacyReview", app_js)
+        self.assertIn("check selected screenshots for personal data", app_js)
+
 
 if __name__ == "__main__":
     unittest.main()
