@@ -24,6 +24,7 @@ class Recorder:
         self._stop_event = threading.Event()
         self._pause_event = threading.Event()
         self._observation_thread: threading.Thread | None = None
+        self._click_threads: list[threading.Thread] = []
         self._mouse_hook: Any | None = None
         self._last_saved_screenshot: str | None = None
         self._skipped_unchanged = 0
@@ -77,7 +78,7 @@ class Recorder:
                 )
                 self._observation_thread.start()
             if mode == "evidence":
-                self._mouse_hook = self.hook_factory(self.capture_click)
+                self._mouse_hook = self.hook_factory(self._queue_click_capture)
                 try:
                     self._mouse_hook.start()
                 except RuntimeError as exc:
@@ -93,6 +94,8 @@ class Recorder:
         if self._mouse_hook is not None:
             self._mouse_hook.stop()
             self._mouse_hook = None
+        for thread in self._pending_click_threads():
+            thread.join(timeout=2)
         with self._lock:
             if self.active_session_id is None:
                 return None
@@ -103,6 +106,10 @@ class Recorder:
             self._pause_event.clear()
             self._last_saved_screenshot = None
             return session
+
+    def _pending_click_threads(self) -> list[threading.Thread]:
+        with self._lock:
+            return list(self._click_threads)
 
     def pause(self) -> None:
         with self._lock:
@@ -139,6 +146,25 @@ class Recorder:
                 "tags": [],
             }
             return self.store.add_event(session_id, event)["events"][-1]
+
+    def _queue_click_capture(self, x: int, y: int) -> None:
+        with self._lock:
+            if self.active_session_id is None:
+                return
+            thread = threading.Thread(target=self._capture_queued_click, args=(x, y), daemon=True)
+            self._click_threads.append(thread)
+        thread.start()
+
+    def _capture_queued_click(self, x: int, y: int) -> None:
+        thread = threading.current_thread()
+        try:
+            self.capture_click(x, y)
+        except RuntimeError:
+            pass
+        finally:
+            with self._lock:
+                if thread in self._click_threads:
+                    self._click_threads.remove(thread)
 
     def capture_periodic(self) -> dict[str, Any]:
         with self._lock:

@@ -25,9 +25,24 @@ def _local_export_dir(root: Path, session_id: str | None = None) -> Path:
 
 
 def _configured_export_dir(configured: str, session_id: str | None = None) -> Path:
-    output_dir = Path(configured).expanduser()
+    output_dir = _normalize_configured_export_dir(configured)
     if session_id:
         output_dir = output_dir / session_id
+    return output_dir
+
+
+def _normalize_configured_export_dir(configured: str) -> Path:
+    output_dir = Path(configured).expanduser()
+    if output_dir.is_absolute() or len(output_dir.parts) != 1:
+        return output_dir
+    known_user_folders = {
+        "desktop": "Desktop",
+        "documents": "Documents",
+        "downloads": "Downloads",
+    }
+    known_folder = known_user_folders.get(configured.strip().lower())
+    if known_folder:
+        return Path.home() / known_folder
     return output_dir
 
 

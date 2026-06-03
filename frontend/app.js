@@ -6,6 +6,8 @@ let currentSessionId = null;
 let latestStatus = { active: false };
 let reviewFilter = "all";
 let reviewSearch = "";
+let isRendering = false;
+let settingsFeedback = "";
 
 const api = {
   async get(path) {
@@ -39,6 +41,7 @@ document.querySelectorAll(".sidebar button").forEach((button) => {
 });
 
 async function refreshStatus() {
+  const previousSignature = statusSignature(latestStatus);
   const status = await api.get("/api/status");
   latestStatus = status;
   statusPill.textContent = status.active ? `${status.mode} recording - ${status.event_count} screenshots` : "Idle";
@@ -49,7 +52,32 @@ async function refreshStatus() {
     statusPill.textContent += " - manual fallback";
   }
   statusPill.classList.toggle("active", status.active);
+  updateLiveStatusDisplay(status);
+  if (!isRendering && currentView !== "sessions" && currentView !== "review" && previousSignature !== statusSignature(status)) {
+    await render(currentView);
+  }
   return status;
+}
+
+function statusSignature(status) {
+  return [
+    status.active ? "active" : "idle",
+    status.session_id || "",
+    status.mode || "",
+    status.paused ? "paused" : "running",
+  ].join("|");
+}
+
+function updateLiveStatusDisplay(status) {
+  document.querySelectorAll("[data-live-event-count]").forEach((element) => {
+    element.textContent = String(status.event_count || 0);
+  });
+  document.querySelectorAll("[data-live-skipped]").forEach((element) => {
+    element.textContent = String(status.skipped_unchanged || 0);
+  });
+  document.querySelectorAll("[data-system-skipped]").forEach((element) => {
+    element.textContent = String(status.skipped_unchanged || 0);
+  });
 }
 
 function setActive(view) {
@@ -60,21 +88,26 @@ function setActive(view) {
 }
 
 async function render(view) {
+  isRendering = true;
   setActive(view);
-  const status = await refreshStatus();
-  if (view === "home") {
-    renderHome();
-  } else if (view === "evidence") {
-    await renderStartForm("evidence", "Evidence Capture");
-  } else if (view === "observation") {
-    await renderStartForm("observation", "Observation Mode");
-  } else if (view === "sessions") {
-    await renderSessions();
-  } else {
-    await renderSettings();
+  try {
+    await refreshStatus();
+    if (view === "home") {
+      renderHome();
+    } else if (view === "evidence") {
+      await renderStartForm("evidence", "Evidence Capture");
+    } else if (view === "observation") {
+      await renderStartForm("observation", "Observation Mode");
+    } else if (view === "sessions") {
+      await renderSessions();
+    } else {
+      await renderSettings();
+    }
+    bindBannerStop();
+    bindPauseResume();
+  } finally {
+    isRendering = false;
   }
-  bindBannerStop();
-  bindPauseResume();
 }
 
 function renderHome() {
@@ -238,7 +271,7 @@ function renderActiveBanner() {
   const elapsed = formatElapsed(latestStatus.elapsed_seconds || 0);
   const fallback = latestStatus.hook_error ? `<p class="muted">${escapeHtml(latestStatus.hook_error)}</p>` : "";
   const skipped = latestStatus.mode === "background"
-    ? `<p class="muted">Skipped unchanged frames: ${escapeHtml(latestStatus.skipped_unchanged || 0)}</p>`
+    ? `<p class="muted">Skipped unchanged frames: <span data-live-skipped>${escapeHtml(latestStatus.skipped_unchanged || 0)}</span></p>`
     : "";
   const paused = latestStatus.paused ? "Paused" : "Active";
   const pauseButton = latestStatus.mode === "observation"
@@ -248,7 +281,7 @@ function renderActiveBanner() {
     <section class="active-banner">
       <div>
         <h2>${escapeHtml(mode)} ${escapeHtml(paused)}</h2>
-        <p>${escapeHtml(elapsed)} elapsed - ${escapeHtml(latestStatus.event_count || 0)} screenshots captured</p>
+        <p>${escapeHtml(elapsed)} elapsed - <span data-live-event-count>${escapeHtml(latestStatus.event_count || 0)}</span> screenshots captured</p>
         ${skipped}
         ${fallback}
       </div>
@@ -285,7 +318,7 @@ function renderSystemStatus() {
         </div>
         <div>
           <strong>Skipped unchanged frames</strong>
-          <p class="muted">${escapeHtml(latestStatus.skipped_unchanged || 0)}</p>
+          <p class="muted" data-system-skipped>${escapeHtml(latestStatus.skipped_unchanged || 0)}</p>
         </div>
         <div>
           <strong>Manual hotkey</strong>
@@ -315,11 +348,15 @@ async function renderReview(sessionId) {
   const metadata = session.metadata || {};
   const events = session.events || [];
   const visibleEvents = PanoptixReviewFilters.filterReviewEvents(events, reviewFilter, reviewSearch);
+  const selectedImageCount = events.filter((event) => event.selected_for_export !== false).length;
   const eventCards = visibleEvents.map((event) => renderEventEditor(session.id, event)).join("");
+  const searchFeedback = reviewSearch
+    ? `<p class="review-feedback">Search active: ${escapeHtml(reviewSearch)} <button class="secondary compact" id="clear-review-search">Clear search</button></p>`
+    : "";
   app.innerHTML = `
     <section class="card">
       <h2>${escapeHtml(metadata.activity || session.id)}</h2>
-      <p class="muted">${escapeHtml(session.mode)} - ${escapeHtml(session.started)} - ${events.length} screenshots</p>
+      <p class="muted">${escapeHtml(session.mode)} - ${escapeHtml(session.started)} - ${events.length} screenshots - ${selectedImageCount} selected for export</p>
       <label class="check-row privacy-check">
         <input id="privacy-review-confirmed" type="checkbox">
         Personal data check: I have checked selected screenshots for personal data before submission.
@@ -350,6 +387,7 @@ async function renderReview(sessionId) {
       <button class="secondary" data-selection="none">Select none</button>
       <button class="secondary" data-selection="highlights">Select highlights</button>
     </section>
+    ${searchFeedback}
     <p class="muted review-count">${visibleEvents.length} of ${events.length} screenshots shown</p>
     <section class="review-list">
       ${eventCards || "<p class='muted'>No screenshots match this filter.</p>"}
@@ -390,6 +428,10 @@ async function renderReview(sessionId) {
     reviewSearch = app.querySelector("#review-search").value;
     await renderReview(sessionId);
   });
+  app.querySelector("#clear-review-search")?.addEventListener("click", async () => {
+    reviewSearch = "";
+    await renderReview(sessionId);
+  });
   app.querySelector("#review-search").addEventListener("keydown", async (event) => {
     if (event.key !== "Enter") {
       return;
@@ -405,7 +447,8 @@ async function renderReview(sessionId) {
 function renderEventEditor(sessionId, event) {
   const tags = Array.isArray(event.tags) ? event.tags.join(", ") : "";
   const checked = event.highlight ? "checked" : "";
-  const imageUrl = `/api/sessions/${encodeURIComponent(sessionId)}/screenshots/${encodeURIComponent(event.screenshot || "")}`;
+  const cacheKey = screenshotVersion(event);
+  const imageUrl = `/api/sessions/${encodeURIComponent(sessionId)}/screenshots/${encodeURIComponent(event.screenshot || "")}?v=${encodeURIComponent(cacheKey)}`;
   const redactionCount = Array.isArray(event.redactions) ? event.redactions.length : 0;
   const redactionLabel = redactionCount ? `<p class="redaction-count">${redactionCount} redaction${redactionCount === 1 ? "" : "s"} applied</p>` : "";
   const restoreButton = redactionCount ? `<button class="secondary" data-restore-original="${event.index}">Undo redactions</button>` : "";
@@ -438,6 +481,12 @@ function renderEventEditor(sessionId, event) {
       </div>
     </article>
   `;
+}
+
+function screenshotVersion(event) {
+  const marker = event.marker ? JSON.stringify(event.marker) : "";
+  const redactionCount = Array.isArray(event.redactions) ? event.redactions.length : 0;
+  return [event.screenshot || "", marker, redactionCount].join("-");
 }
 
 function renderRedactionHistory(event) {
@@ -529,6 +578,15 @@ function requirePrivacyReview() {
   return false;
 }
 
+function requireSelectedScreenshots() {
+  const selectedCount = app.querySelectorAll('[data-field="selected_for_export"]:checked').length;
+  if (selectedCount > 0) {
+    return true;
+  }
+  alert("No screenshots are currently selected for export.");
+  return false;
+}
+
 async function exportSession(sessionId) {
   if (!requirePrivacyReview()) {
     return;
@@ -539,6 +597,9 @@ async function exportSession(sessionId) {
 
 async function exportImages(sessionId, variant) {
   if (!requirePrivacyReview()) {
+    return;
+  }
+  if (!requireSelectedScreenshots()) {
     return;
   }
   const result = await api.post(`/api/sessions/${sessionId}/export-images`, { variant });
@@ -635,6 +696,10 @@ async function renderSettings() {
   const warningText = storage.warning
     ? `Storage is above the ${storage.warning_mb} MB warning threshold.`
     : `Storage is below the ${storage.warning_mb} MB warning threshold.`;
+  const saveFeedback = settingsFeedback
+    ? `<p class="save-feedback" id="settings-save-feedback">${escapeHtml(settingsFeedback)}</p>`
+    : "";
+  settingsFeedback = "";
   app.innerHTML = `
     <section class="card ${warningClass}">
       <h2>Local Storage</h2>
@@ -648,6 +713,7 @@ async function renderSettings() {
     ${renderSystemStatus()}
     <form class="card form" id="settings-form">
       <h2>Settings</h2>
+      ${saveFeedback}
       <label>Observation screenshot interval seconds <input name="observation_interval_seconds" type="number" min="5" value="${escapeAttr(settings.observation_interval_seconds)}"></label>
       <h2>Scheduled passive capture</h2>
       <label class="check-row"><input name="background_enabled" type="checkbox" ${settings.background_enabled ? "checked" : ""}> Start passive capture during the daily window</label>
@@ -710,6 +776,8 @@ async function renderSettings() {
       marker_size: Number(form.get("marker_size")),
       marker_stroke: Number(form.get("marker_stroke")),
     });
+    settingsFeedback = "Settings saved";
+    await refreshStatus();
     await renderSettings();
   });
   app.querySelector("#cleanup-retention").addEventListener("click", async () => {

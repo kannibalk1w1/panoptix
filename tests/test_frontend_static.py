@@ -93,6 +93,31 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("requirePrivacyReview", app_js)
         self.assertIn("check selected screenshots for personal data", app_js)
 
+    def test_review_refreshes_mutated_screenshot_urls_and_blocks_empty_image_exports(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("screenshotVersion", app_js)
+        self.assertIn("cacheKey", app_js)
+        self.assertIn("selectedImageCount", app_js)
+        self.assertIn("requireSelectedScreenshots", app_js)
+        self.assertIn("No screenshots are currently selected for export", app_js)
+
+    def test_status_poll_updates_banner_and_rerenders_on_tray_state_changes(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("statusSignature", app_js)
+        self.assertIn("updateLiveStatusDisplay", app_js)
+        self.assertIn("data-live-event-count", app_js)
+        self.assertIn("data-system-skipped", app_js)
+
+    def test_settings_and_review_show_feedback_for_save_and_search(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("settings-save-feedback", app_js)
+        self.assertIn("Settings saved", app_js)
+        self.assertIn("Search active", app_js)
+        self.assertIn("clear-review-search", app_js)
+
 
 if __name__ == "__main__":
     unittest.main()

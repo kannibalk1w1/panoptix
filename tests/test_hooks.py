@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import sys
+import time
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -8,6 +9,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from panoptix_app.capture import PlaceholderCapture
 from panoptix_app.recorder import Recorder
 from panoptix_app.storage import SessionStore
+
+
+class SlowCapture(PlaceholderCapture):
+    def capture(self, output_dir, filename, marker=None):
+        time.sleep(0.2)
+        return super().capture(output_dir, filename, marker)
 
 
 class FakeHook:
@@ -53,6 +60,22 @@ class HookIntegrationTests(unittest.TestCase):
             self.assertEqual(loaded["events"][0]["type"], "click")
             self.assertEqual(loaded["events"][0]["x"], 320)
             self.assertEqual(loaded["events"][0]["y"], 180)
+
+    def test_forwarded_hook_click_does_not_block_on_screenshot_capture(self):
+        with TemporaryDirectory() as tmp:
+            store = SessionStore(Path(tmp))
+            hook_factory = HookFactory()
+            recorder = Recorder(store, SlowCapture(), hook_factory=hook_factory)
+            session = recorder.start("evidence", {}, {})
+
+            start = time.perf_counter()
+            hook_factory.hooks[0].emit_click(320, 180)
+            elapsed = time.perf_counter() - start
+            recorder.stop()
+
+            loaded = store.load_session(session["id"])
+            self.assertLess(elapsed, 0.1)
+            self.assertEqual(loaded["events"][0]["type"], "click")
 
     def test_observation_mode_does_not_start_click_hook(self):
         with TemporaryDirectory() as tmp:

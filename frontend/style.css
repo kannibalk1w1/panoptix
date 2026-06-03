@@ -139,6 +139,20 @@ h1, h2, h3, p {
   color: var(--text);
 }
 
+.save-feedback,
+.review-feedback {
+  padding: 10px 12px;
+  border: 1px solid #2f6f49;
+  border-radius: 8px;
+  background: #102219;
+  color: var(--accent);
+}
+
+.compact {
+  padding: 7px 10px;
+  margin-left: 8px;
+}
+
 .form {
   display: grid;
   gap: 14px;

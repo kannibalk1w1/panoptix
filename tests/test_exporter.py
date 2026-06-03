@@ -105,6 +105,18 @@ class HtmlExporterTests(unittest.TestCase):
             self.assertEqual(output["html"].parent, export_root / session["id"])
             self.assertEqual(output["pdf"].parent, export_root / session["id"])
 
+    def test_bare_downloads_export_directory_resolves_to_user_downloads_folder(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SessionStore(root)
+            store.settings_path = root / "settings.json"
+            store.settings_path.write_text(json.dumps({"export_directory": "Downloads"}), encoding="utf-8")
+
+            status = export_destination_status(root, "session-1")
+
+            self.assertEqual(Path(status["path"]), Path.home() / "Downloads" / "session-1")
+            self.assertTrue(status["using_configured_directory"])
+
     def test_export_destination_status_reports_fallback_when_configured_path_is_unusable(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -194,6 +206,35 @@ class HtmlExporterTests(unittest.TestCase):
             self.assertIn("metadata.json", names)
             self.assertTrue(any(name.endswith("001_annotated.png") for name in names))
             self.assertFalse(any(name.endswith("002_annotated.png") for name in names))
+
+    def test_image_zip_export_both_includes_original_and_annotated_images(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SessionStore(root)
+            session = store.create_session("evidence", {"activity": "Both images"}, {})
+            screenshot_dir = root / "sessions" / session["id"] / "screenshots"
+            original = PlaceholderCapture().capture(screenshot_dir / "originals", "001.png")
+            annotated = PlaceholderCapture().capture(screenshot_dir, "001.png")
+            store.add_event(
+                session["id"],
+                {
+                    "type": "click",
+                    "timestamp": "2026-05-28T10:00:00",
+                    "screenshot": annotated.name,
+                    "original_screenshot": f"originals/{original.name}",
+                    "selected_for_export": True,
+                    "x": 10,
+                    "y": 10,
+                },
+            )
+
+            output = ImageZipExporter(root).export(session["id"], variant="both")
+
+            with ZipFile(output) as archive:
+                names = archive.namelist()
+
+            self.assertTrue(any(name.endswith("001_original.png") for name in names))
+            self.assertTrue(any(name.endswith("001_annotated.png") for name in names))
 
     def test_evidence_pack_export_includes_reports_images_and_manifests(self):
         with TemporaryDirectory() as tmp:
