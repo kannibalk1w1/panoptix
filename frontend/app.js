@@ -831,7 +831,7 @@ function renderDataLocationCard(dataLocation) {
     ? `<p class="status-warning"><strong>Screenshot folder warning</strong>: ${escapeHtml(dataLocation.warning)}</p>`
     : "";
   const restart = dataLocation.restart_required
-    ? `<p class="status-warning">Restart Panoptix to start saving into ${escapeHtml(dataLocation.path)}.</p>`
+    ? `<p class="status-warning">Panoptix could not switch to ${escapeHtml(dataLocation.path)}. Restart to try again.</p>`
     : "";
   return `
     <section class="card">
@@ -873,7 +873,7 @@ async function saveDataDirectory(directory) {
   const updated = response.data_location || {};
   dataLocationFeedback = updated.restart_required
     ? "Screenshot folder saved. Restart Panoptix to start using it."
-    : "Screenshot folder saved.";
+    : `Screenshot folder saved. New screenshots are going to ${updated.active_path} now.`;
   await refreshStatus();
   await renderSettings();
 }

@@ -54,7 +54,7 @@ written there.
 Notes:
 
 - The chosen folder is remembered in `%LOCALAPPDATA%\Panoptix\config.json`, so it survives upgrades.
-- Panoptix must be restarted before a new folder is used; the Settings card says so after saving.
+- The new folder takes effect immediately; no restart is needed. Stop any active recording first.
 - Existing sessions stay where they are. Copy them into the new folder if they are still needed.
 - If the folder is unreachable at startup, Panoptix falls back to local storage and shows a warning on Home instead of failing to start.
 - Precedence is `PANOPTIX_DATA_DIR` environment variable, then the configured folder, then `%LOCALAPPDATA%\Panoptix\data`.

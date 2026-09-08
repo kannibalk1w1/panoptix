@@ -42,11 +42,13 @@
 - [ ] Confirm the Windows folder picker opens.
 - [ ] Choose a network folder the admin PC can also reach.
 - [ ] Click `Save screenshot folder`.
-- [ ] Confirm the restart notice appears.
-- [ ] Close and reopen Panoptix.
-- [ ] Confirm `In use now` shows the network folder.
+- [ ] Confirm `In use now` switches to the network folder without restarting.
 - [ ] Capture a session.
 - [ ] Confirm screenshots appear in the network folder from the admin PC.
+- [ ] Start a recording, then try to change the folder.
+- [ ] Confirm Panoptix asks you to stop the recording first.
+- [ ] Close and reopen Panoptix.
+- [ ] Confirm `In use now` still shows the network folder.
 - [ ] Disconnect from the network or rename the folder.
 - [ ] Restart Panoptix.
 - [ ] Confirm Home shows the `Screenshot folder warning` and the app still runs.
@@ -77,6 +79,21 @@
 - [ ] Confirm screenshot count increases.
 - [ ] Stop recording.
 - [ ] Confirm session appears in Sessions.
+
+## 4b. Multiple Monitors
+
+Skip this section on a single-screen PC.
+
+- [ ] Confirm Windows is extending the desktop across all screens, not duplicating.
+- [ ] Start an evidence capture.
+- [ ] Click something on the primary screen.
+- [ ] Click something on each secondary screen.
+- [ ] Stop the capture and open the session.
+- [ ] Confirm every screenshot shows all screens side by side, not just the primary one.
+- [ ] Confirm the red click marker sits on the thing you actually clicked, on every screen.
+- [ ] Repeat with a screen arranged to the left of, or above, the primary one.
+- [ ] Confirm the markers are still in the right place.
+- [ ] Export the session and confirm the images in the export match what you saw on screen.
 
 ## 5. Evidence Review
 

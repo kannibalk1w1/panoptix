@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from .annotation import DEFAULT_MARKER, annotate_click, normalize_marker
-from .capture import ScreenCapture
+from .capture import ScreenCapture, to_image_coordinates
 from .frame_diff import images_are_different
 from .hooks import GlobalMouseHook
 from .models import now_iso
@@ -131,14 +131,20 @@ class Recorder:
             original_dir = screenshot_dir / "originals"
             marker = normalize_marker(self.store.load_session(session_id).get("settings", {}).get("marker", DEFAULT_MARKER))
             original = self.capture.capture(original_dir, filename)
-            screenshot = annotate_click(original, screenshot_dir / filename, x, y, marker)
+            # The capture spans every monitor, so the click has to be moved out of
+            # virtual-desktop space and into pixels on the saved image.
+            origin = getattr(self.capture, "last_origin", (0, 0))
+            image_x, image_y = to_image_coordinates(x, y, origin)
+            screenshot = annotate_click(original, screenshot_dir / filename, image_x, image_y, marker)
             event = {
                 "type": "click",
                 "timestamp": now_iso(),
                 "screenshot": screenshot.name,
                 "original_screenshot": f"originals/{original.name}",
-                "x": x,
-                "y": y,
+                "x": image_x,
+                "y": image_y,
+                "screen_x": x,
+                "screen_y": y,
                 "marker": marker,
                 "title": "",
                 "staff_note": "",

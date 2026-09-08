@@ -136,5 +136,46 @@ class FolderPickerTests(unittest.TestCase):
         self.assertIn("Windows", result["error"])
 
 
+class SwitchRootTests(unittest.TestCase):
+    def test_switching_folder_moves_new_sessions_and_keeps_settings(self):
+        from panoptix_app.capture import PlaceholderCapture
+        from panoptix_app.recorder import Recorder
+        from panoptix_app.server import DataContext
+        from panoptix_app.settings import SettingsStore
+        from panoptix_app.storage import SessionStore
+
+        with TemporaryDirectory() as old_root, TemporaryDirectory() as new_root:
+            settings_store = SettingsStore(Path(old_root))
+            settings_store.update({"retention_days": 7, "manual_hotkey": "<ctrl>+<alt>+z"})
+            store = SessionStore(Path(old_root))
+            recorder = Recorder(store, PlaceholderCapture())
+            context = DataContext(Path(old_root), store, recorder, settings_store)
+
+            self.assertTrue(context.switch_root(Path(new_root)))
+
+            self.assertEqual(context.root, Path(new_root))
+            self.assertEqual(context.store.root, Path(new_root))
+            # The recorder writes through the context's store, so captures land
+            # in the new folder without a restart.
+            self.assertIs(recorder.store, context.store)
+            # The scheduler and hotkey service share this instance.
+            self.assertEqual(settings_store.root, Path(new_root))
+            self.assertEqual(settings_store.load()["retention_days"], 7)
+            self.assertEqual(settings_store.load()["manual_hotkey"], "<ctrl>+<alt>+z")
+
+    def test_switching_to_the_same_folder_is_a_no_op(self):
+        from panoptix_app.capture import PlaceholderCapture
+        from panoptix_app.recorder import Recorder
+        from panoptix_app.server import DataContext
+        from panoptix_app.storage import SessionStore
+
+        with TemporaryDirectory() as tmp:
+            store = SessionStore(Path(tmp))
+            context = DataContext(Path(tmp), store, Recorder(store, PlaceholderCapture()))
+
+            self.assertFalse(context.switch_root(Path(tmp)))
+            self.assertIs(context.store, store)
+
+
 if __name__ == "__main__":
     unittest.main()

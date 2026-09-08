@@ -35,25 +35,51 @@ from .storage_usage import get_storage_usage
 from .tray import start_tray
 
 
+class DataContext:
+    """Holds everything bound to the data folder so it can be swapped without
+    restarting Panoptix."""
+
+    def __init__(self, root: Path, store: SessionStore, recorder: Recorder, settings_store: SettingsStore | None = None):
+        self.root = Path(root)
+        self.store = store
+        self.recorder = recorder
+        self.settings_store = settings_store or SettingsStore(self.root)
+
+    def switch_root(self, new_root: Path) -> bool:
+        new_root = Path(new_root)
+        if new_root == self.root:
+            return False
+        # Carry the current settings across so switching folders does not silently
+        # reset the capture schedule, hotkey and marker preferences.
+        settings = self.settings_store.load()
+        self.root = new_root
+        self.store = SessionStore(new_root)
+        self.recorder.store = self.store
+        self.settings_store.set_root(new_root)
+        if not self.settings_store.path.exists():
+            self.settings_store.update(settings)
+        return True
+
+
 def create_handler(
     root: Path,
     store: SessionStore,
     recorder: Recorder,
     hotkeys: HotkeyService | None = None,
     startup: StartupManager | None = None,
+    settings_store: SettingsStore | None = None,
 ):
-    root = Path(root)
     frontend_dir = get_project_root() / "frontend"
-    settings_store = SettingsStore(root)
+    context = DataContext(root, store, recorder, settings_store)
 
     def data_location_status() -> dict[str, Any]:
         status = resolve_data_root()
-        status["active_path"] = str(root)
-        status["restart_required"] = Path(status["path"]) != root
+        status["active_path"] = str(context.root)
+        status["restart_required"] = Path(status["path"]) != context.root
         return status
 
     def app_status() -> dict[str, Any]:
-        settings = settings_store.load()
+        settings = context.settings_store.load()
         status = recorder.status()
         status["background"] = {
             "enabled": bool(settings.get("background_enabled")),
@@ -74,7 +100,7 @@ def create_handler(
             "requested": bool(settings.get("launch_on_startup")),
             "installed": startup.is_enabled() if startup is not None else False,
         }
-        status["export_destination"] = export_destination_status(root)
+        status["export_destination"] = export_destination_status(context.root)
         status["data_location"] = data_location_status()
         return status
 
@@ -85,19 +111,19 @@ def create_handler(
                 if path == "/api/status":
                     self._json(app_status())
                 elif path == "/api/settings":
-                    self._json({"settings": settings_store.load()})
+                    self._json({"settings": context.settings_store.load()})
                 elif path == "/api/data-location":
                     self._json({"data_location": data_location_status()})
                 elif path == "/api/storage":
-                    settings = settings_store.load()
-                    self._json({"storage": get_storage_usage(root, settings["storage_warning_mb"])})
+                    settings = context.settings_store.load()
+                    self._json({"storage": get_storage_usage(context.root, settings["storage_warning_mb"])})
                 elif path == "/api/sessions":
-                    self._json({"sessions": store.list_sessions()})
+                    self._json({"sessions": context.store.list_sessions()})
                 elif path.startswith("/api/sessions/") and "/screenshots/" in path:
                     self._screenshot(path)
                 elif path.startswith("/api/sessions/"):
                     session_id = unquote(path.removeprefix("/api/sessions/"))
-                    self._json({"session": store.load_session(session_id)})
+                    self._json({"session": context.store.load_session(session_id)})
                 else:
                     self._static(path)
             except Exception as exc:
@@ -129,25 +155,25 @@ def create_handler(
                     self._json({"event": recorder.capture_periodic()})
                 elif path.startswith("/api/sessions/") and path.endswith("/export"):
                     session_id = unquote(path.split("/")[-2])
-                    output = SessionExporter(root).export(session_id)
+                    output = SessionExporter(context.root).export(session_id)
                     self._json({"html": str(output["html"]), "pdf": str(output["pdf"])})
                 elif path.startswith("/api/sessions/") and path.endswith("/export-images"):
                     session_id = unquote(path.split("/")[-2])
-                    output = ImageZipExporter(root).export(session_id, variant=payload.get("variant", "annotated"))
+                    output = ImageZipExporter(context.root).export(session_id, variant=payload.get("variant", "annotated"))
                     self._json({"zip": str(output)})
                 elif path.startswith("/api/sessions/") and path.endswith("/export-pack"):
                     session_id = unquote(path.split("/")[-2])
-                    output = EvidencePackExporter(root).export(session_id)
+                    output = EvidencePackExporter(context.root).export(session_id)
                     self._json({"zip": str(output)})
                 elif path.startswith("/api/sessions/") and path.endswith("/verify-pack"):
                     session_id = unquote(path.split("/")[-2])
-                    self._json(EvidencePackVerifier(root).verify(session_id))
+                    self._json(EvidencePackVerifier(context.root).verify(session_id))
                 elif path.startswith("/api/sessions/") and path.endswith("/redact"):
                     parts = path.split("/")
                     session_id = unquote(parts[3])
                     event_index = int(parts[5])
                     result = redact_event_screenshot(
-                        store,
+                        context.store,
                         session_id,
                         event_index,
                         rect=payload.get("rect"),
@@ -158,17 +184,17 @@ def create_handler(
                     parts = path.split("/")
                     session_id = unquote(parts[3])
                     event_index = int(parts[5])
-                    self._json(update_event_marker(store, session_id, event_index, payload))
+                    self._json(update_event_marker(context.store, session_id, event_index, payload))
                 elif path.startswith("/api/sessions/") and path.endswith("/restore-original"):
                     parts = path.split("/")
                     session_id = unquote(parts[3])
                     event_index = int(parts[5])
-                    self._json(restore_original_screenshot(store, session_id, event_index))
+                    self._json(restore_original_screenshot(context.store, session_id, event_index))
                 elif path == "/api/browse-folder":
                     self._json({"result": pick_folder(str(payload.get("initial", "")))})
                 elif path == "/api/retention/cleanup":
-                    settings = settings_store.load()
-                    self._json(cleanup_old_sessions(store, settings["retention_days"]))
+                    settings = context.settings_store.load()
+                    self._json(cleanup_old_sessions(context.store, settings["retention_days"]))
                 else:
                     self.send_error(404)
             except Exception as exc:
@@ -178,7 +204,7 @@ def create_handler(
             path = urlparse(self.path).path
             try:
                 if path == "/api/settings":
-                    updated_settings = settings_store.update(self._payload())
+                    updated_settings = context.settings_store.update(self._payload())
                     if startup is not None:
                         startup.set_enabled(bool(updated_settings.get("launch_on_startup")))
                     self._json({"settings": updated_settings})
@@ -190,18 +216,23 @@ def create_handler(
                         problem = directory_problem(normalize_directory(directory))
                         if problem:
                             raise ValueError(f"That folder cannot be used: {problem}")
+                    if recorder.status()["active"]:
+                        raise ValueError(
+                            "Stop the current recording before changing the screenshot folder."
+                        )
                     set_configured_data_directory(directory)
+                    context.switch_root(Path(resolve_data_root()["path"]))
                     self._json({"data_location": data_location_status()})
                 elif path.startswith("/api/sessions/") and "/events/" in path:
                     parts = path.split("/")
                     session_id = unquote(parts[3])
                     event_index = int(parts[5])
-                    session = store.update_event(session_id, event_index, self._payload())
+                    session = context.store.update_event(session_id, event_index, self._payload())
                     event = next(item for item in session["events"] if item.get("index") == event_index)
                     self._json({"session": session, "event": event})
                 elif path.startswith("/api/sessions/"):
                     session_id = unquote(path.removeprefix("/api/sessions/"))
-                    self._json({"session": store.update_session(session_id, self._payload())})
+                    self._json({"session": context.store.update_session(session_id, self._payload())})
                 else:
                     self.send_error(404)
             except Exception as exc:
@@ -214,10 +245,10 @@ def create_handler(
                     parts = path.split("/")
                     session_id = unquote(parts[3])
                     event_index = int(parts[5])
-                    self._json({"session": store.delete_event(session_id, event_index)})
+                    self._json({"session": context.store.delete_event(session_id, event_index)})
                 elif path.startswith("/api/sessions/"):
                     session_id = unquote(path.removeprefix("/api/sessions/"))
-                    store.delete_session(session_id)
+                    context.store.delete_session(session_id)
                     self._json({"ok": True})
                 else:
                     self.send_error(404)
@@ -268,7 +299,7 @@ def create_handler(
             if "/" in filename or "\\" in filename or not filename.endswith(".png"):
                 self.send_error(404)
                 return
-            target = store.screenshot_dir(session_id) / filename
+            target = context.store.screenshot_dir(session_id) / filename
             if not target.exists():
                 self.send_error(404)
                 return
@@ -283,6 +314,7 @@ def create_handler(
 
 
 def run_server(root: Path, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
+    root = Path(root)
     store = SessionStore(root)
     recorder = Recorder(store)
     settings_store = SettingsStore(root)
@@ -292,7 +324,9 @@ def run_server(root: Path, host: str = "127.0.0.1", port: int = 8765) -> Threadi
     scheduler.start()
     hotkeys.start()
     startup.set_enabled(bool(settings_store.load().get("launch_on_startup")))
-    handler = create_handler(root, store, recorder, hotkeys, startup)
+    # The scheduler and hotkey service share this settings store, so they follow
+    # the handler when the screenshot folder is changed at runtime.
+    handler = create_handler(root, store, recorder, hotkeys, startup, settings_store)
     server = ThreadingHTTPServer((host, port), handler)
     tray_icon = start_tray(f"http://{host}:{server.server_address[1]}", recorder, settings_store, server)
     print(f"Panoptix running at http://{host}:{server.server_address[1]}")
