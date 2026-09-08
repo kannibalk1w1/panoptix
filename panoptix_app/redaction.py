@@ -7,21 +7,26 @@ from typing import Any
 from PIL import Image, ImageDraw
 
 from .annotation import annotate_click
-from .storage import SessionStore
+from .storage import SessionStore, session_transaction
+from .persistence import atomic_output
 
 
+@session_transaction
 def redact_event_screenshot(
     root: Path | SessionStore,
     session_id: str,
     event_index: int,
     rect: dict[str, int] | None = None,
     preset: str | None = None,
+    expected_screenshot: str | None = None,
 ) -> dict[str, Any]:
     store = root if isinstance(root, SessionStore) else SessionStore(Path(root))
     session = store.load_session(session_id)
     event = next((item for item in session["events"] if item.get("index") == event_index), None)
     if event is None:
         raise KeyError(f"Event not found: {event_index}")
+    if expected_screenshot is not None and event.get("screenshot") != expected_screenshot:
+        raise ValueError("This screenshot changed position. Close the viewer and reload the session.")
 
     screenshot_dir = store.screenshot_dir(session_id)
     image_path = screenshot_dir / event["screenshot"]
@@ -38,7 +43,8 @@ def redact_event_screenshot(
         working = image.convert("RGB")
         box = _resolve_box(working.size, rect, preset)
         ImageDraw.Draw(working).rectangle(box, fill=(0, 0, 0))
-        working.save(image_path)
+        with atomic_output(image_path) as temporary:
+            working.save(temporary)
 
     redaction = {
         "type": "black_box",
@@ -69,11 +75,14 @@ def _resolve_box(size: tuple[int, int], rect: dict[str, int] | None, preset: str
         raise ValueError("Redaction requires rect or preset")
     x = max(0, int(rect["x"]))
     y = max(0, int(rect["y"]))
+    if x >= width or y >= height:
+        raise ValueError("Redaction box must overlap the screenshot")
     redaction_width = max(1, int(rect["width"]))
     redaction_height = max(1, int(rect["height"]))
     return (x, y, min(width, x + redaction_width), min(height, y + redaction_height))
 
 
+@session_transaction
 def restore_original_screenshot(root: Path | SessionStore, session_id: str, event_index: int) -> dict[str, Any]:
     store = root if isinstance(root, SessionStore) else SessionStore(Path(root))
     session = store.load_session(session_id)
@@ -88,6 +97,7 @@ def restore_original_screenshot(root: Path | SessionStore, session_id: str, even
     if "x" in event and "y" in event:
         annotate_click(backup_path, image_path, int(event["x"]), int(event["y"]), event.get("marker"))
     else:
-        shutil.copy2(backup_path, image_path)
+        with atomic_output(image_path) as temporary:
+            shutil.copy2(backup_path, temporary)
     session = store.update_event(session_id, event_index, {"redactions": []})
     return {"session": session, "event": next(item for item in session["events"] if item.get("index") == event_index)}

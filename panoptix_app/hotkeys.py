@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Callable
+import logging
 
 
 class HotkeyService:
@@ -12,6 +13,7 @@ class HotkeyService:
         self.error: str | None = None
 
     def start(self) -> None:
+        self.error = None
         settings = self.settings_store.load()
         if not settings.get("manual_hotkey_enabled"):
             return
@@ -43,6 +45,8 @@ class HotkeyService:
             self.recorder.capture_manual_hotkey()
         except RuntimeError:
             return
+        except Exception:
+            logging.exception("Manual capture failed")
 
     @staticmethod
     def _default_listener_factory() -> Callable | None:

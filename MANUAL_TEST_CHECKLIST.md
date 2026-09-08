@@ -29,7 +29,7 @@
 ## 2. Settings
 
 - [ ] Go to Settings.
-- [ ] Change passive capture window start/end time.
+- [ ] In the weekly timetable, choose different half-hour blocks on different weekdays.
 - [ ] Set passive interval to `5`.
 - [ ] Toggle `Skip unchanged passive screenshots` on.
 - [ ] Set change threshold to `4`.
@@ -198,10 +198,10 @@ Skip this section on a single-screen PC.
 ## 11. Passive Background Capture
 
 - [ ] In Settings, enable scheduled passive capture.
-- [ ] Set the daily window to include the current time.
+- [ ] Select a timetable block for the current weekday and time.
 - [ ] Set interval to `5`.
 - [ ] Enable change detection.
-- [ ] Wait 10-20 seconds.
+- [ ] Wait up to 30 seconds for the scheduler to check the timetable.
 - [ ] Confirm Home active banner says `Background Capture`.
 - [ ] Confirm screenshots are captured.
 - [ ] Leave screen static.
@@ -244,7 +244,7 @@ Skip this section on a single-screen PC.
 - [ ] Confirm Local Storage total appears.
 - [ ] Set retention days low only if using test sessions.
 - [ ] Click cleanup.
-- [ ] Confirm old sessions are deleted.
+- [ ] Preview the list and confirm old sessions move to Deleted sessions.
 - [ ] Confirm recent sessions remain.
 
 ## 16. Delete Safety
@@ -255,6 +255,7 @@ Skip this section on a single-screen PC.
 - [ ] Delete one test session.
 - [ ] Confirm it disappears from Sessions.
 - [ ] Confirm unrelated sessions remain.
+- [ ] Open Deleted sessions and restore the removed session, including its images and notes.
 
 ## 17. Restart Persistence
 
@@ -279,3 +280,60 @@ Skip this section on a single-screen PC.
 - [ ] Tray controls and dashboard disagree.
 - [ ] Dashboard shows active recording after stop.
 - [ ] Session data disappears after restart.
+
+## Regression Checks After The Repository Review
+
+- [ ] Redact a click screenshot, change its marker, and confirm the black boxes remain.
+- [ ] Export a default evidence pack and confirm it contains no `_original.png` files.
+- [ ] Explicitly include originals and confirm the unredacted-data warning appears.
+- [ ] Exclude an event with a distinctive note; confirm that note is absent from image-ZIP metadata.
+- [ ] Capture three screenshots, remove the first from the report during recording,
+      then capture another. Confirm the retained screenshots have not changed.
+- [ ] Edit notes on two screenshots, save one, change filters and navigate away/back.
+      Confirm the other draft remains. Confirm export saves both notes.
+- [ ] Filter out all selected screenshots, then export annotated images. Confirm
+      the selected images still export.
+- [ ] Simulate an unwritable export destination and confirm a failure is shown,
+      without a success message.
+- [ ] Open a PDF containing CYP, activity, staff and purpose; confirm all metadata
+      appears inside the page margins.
+- [ ] Try deleting the active recording's session; confirm deletion is rejected.
+- [ ] Disconnect screenshot storage during capture. Confirm the dashboard shows
+      a failure and a new recording can start after storage is restored.
+- [ ] Pause evidence capture through the tray; confirm clicks and hotkeys save nothing.
+- [ ] Start manual passive capture with scheduling disabled; confirm it stays running
+      beyond the scheduler's 30-second poll.
+- [ ] Stop a scheduled session during its window; confirm it stays stopped through
+      subsequent polls and can start in the next separate scheduled block.
+- [ ] Open the app from source with Windows startup enabled; confirm the startup
+      command launches `panoptix.py` as well as Python.
+- [ ] From two PCs using the updated version and the same network folder, save notes
+      while capturing. Confirm notes, events and images are retained correctly.
+
+## Review Shortcuts
+
+- [ ] Export a session, click Open export folder, and confirm the correct folder opens in Explorer.
+- [ ] Edit two screenshot notes; confirm the unsaved count is two. Hide one with a
+      filter, click Save all notes, and confirm both changes persist after reload.
+- [ ] Search sessions by activity and mode. Set the same From and To date and
+      confirm sessions from that date are included. Clear filters.
+- [ ] Open Zoom / drag to redact; test Fit, 100% and 200%, including scrolling.
+      Draw in both directions, clear a selection, then apply one. Confirm the
+      correct region is blacked out in Review and the annotated export.
+- [ ] Open retention preview and cancel; confirm nothing moved. Open it again and
+      confirm; restore a session from Deleted sessions and verify its saved notes,
+      original images, redactions and local exports remain intact.
+
+## Weekly Timetable
+
+- [ ] Open Settings and confirm the previous daily schedule is reflected across the week.
+- [ ] Clear the grid; drag a rectangle across Monday–Wednesday from 09:00–10:30.
+- [ ] Toggle one Tuesday block off using a click, then toggle another with Space.
+- [ ] Save, reload, and confirm each weekday's blocks persist independently.
+- [ ] Test the weekday preset and Copy Monday to all days, including weekends.
+- [ ] Schedule two separated blocks today; confirm capture stops in the gap and
+      starts a new session in the next block (allow up to 30 seconds for polling).
+- [ ] Schedule adjacent blocks and confirm they share a single recording session.
+- [ ] Stop during an active block; confirm automation stays stopped until the next
+      separate block. Manual capture should still be available.
+- [ ] Confirm an empty timetable does not start automated capture.

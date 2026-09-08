@@ -9,33 +9,82 @@ let reviewSearch = "";
 let isRendering = false;
 let settingsFeedback = "";
 let dataLocationFeedback = "";
+let reviewSession = null;
+const reviewDrafts = new Map();
+const sessionFilters = { query: "", from: "", to: "" };
+
+async function apiRequest(path, method = "GET", body) {
+  const response = await fetch(path, {
+    method,
+    ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error(`Panoptix returned an unreadable response (${response.status}).`);
+  }
+  if (!response.ok || result.error) {
+    throw new Error(result.error || `Request failed (${response.status}).`);
+  }
+  return result;
+}
 
 const api = {
-  async get(path) {
-    const response = await fetch(path);
-    return response.json();
-  },
-  async post(path, body = {}) {
-    const response = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    return response.json();
-  },
-  async patch(path, body = {}) {
-    const response = await fetch(path, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    return response.json();
-  },
-  async delete(path) {
-    const response = await fetch(path, { method: "DELETE" });
-    return response.json();
-  },
+  get: (path) => apiRequest(path),
+  post: (path, body = {}) => apiRequest(path, "POST", body),
+  patch: (path, body = {}) => apiRequest(path, "PATCH", body),
+  delete: (path) => apiRequest(path, "DELETE"),
 };
+
+window.addEventListener("unhandledrejection", (event) => {
+  event.preventDefault();
+  alert(event.reason?.message || "The operation failed. Please try again.");
+});
+
+function draftKey(sessionId, screenshot) {
+  return `${sessionId}/${screenshot}`;
+}
+
+function rememberReviewDrafts() {
+  if (currentView !== "review" || !reviewSession) return;
+  const visible = new Map();
+  app.querySelectorAll("[data-event][data-field]").forEach((field) => {
+    const saved = reviewSession.events.find((event) => String(event.index) === field.dataset.event);
+    if (!saved) return;
+    const key = draftKey(reviewSession.id, saved.screenshot);
+    if (!visible.has(key)) visible.set(key, {});
+    const name = field.dataset.field;
+    const value = name === "tags" ? field.value.split(",").map((tag) => tag.trim()).filter(Boolean)
+      : field.type === "checkbox" ? field.checked : field.value;
+    const original = name === "selected_for_export" ? saved[name] !== false
+      : name === "highlight" ? Boolean(saved[name]) : saved[name] || (name === "tags" ? [] : "");
+    if (JSON.stringify(value) !== JSON.stringify(original)) visible.get(key)[name] = value;
+  });
+  visible.forEach((draft, key) => {
+    if (Object.keys(draft).length) reviewDrafts.set(key, draft);
+    else reviewDrafts.delete(key);
+  });
+  updateDraftIndicator();
+}
+
+function updateDraftIndicator() {
+  const count = [...reviewDrafts.keys()].filter((key) => key.startsWith(`${currentSessionId}/`)).length;
+  const label = app.querySelector("#draft-status");
+  if (label) label.textContent = count ? `${count} screenshot${count === 1 ? " has" : "s have"} unsaved changes` : "All changes saved";
+  const button = app.querySelector("#save-all-notes");
+  if (button) button.disabled = count === 0;
+}
+
+window.addEventListener("beforeunload", (event) => {
+  rememberReviewDrafts();
+  if (reviewDrafts.size) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
+app.addEventListener("input", rememberReviewDrafts);
+app.addEventListener("change", rememberReviewDrafts);
 
 document.querySelectorAll(".sidebar button").forEach((button) => {
   button.addEventListener("click", () => render(button.dataset.view));
@@ -52,9 +101,12 @@ async function refreshStatus() {
   if (status.hook_error) {
     statusPill.textContent += " - manual fallback";
   }
+  if (status.capture_error) statusPill.textContent = status.capture_error;
+  else if (status.storage_error) statusPill.textContent = `Storage unavailable: ${status.storage_error}`;
+  else if (status.paused) statusPill.textContent += " - paused";
   statusPill.classList.toggle("active", status.active);
   updateLiveStatusDisplay(status);
-  if (!isRendering && currentView !== "sessions" && currentView !== "review" && previousSignature !== statusSignature(status)) {
+  if (!isRendering && !["sessions", "review", "settings", "trash"].includes(currentView) && previousSignature !== statusSignature(status)) {
     await render(currentView);
   }
   return status;
@@ -66,6 +118,7 @@ function statusSignature(status) {
     status.session_id || "",
     status.mode || "",
     status.paused ? "paused" : "running",
+    status.capture_error || "",
   ].join("|");
 }
 
@@ -92,6 +145,7 @@ function setActive(view) {
 }
 
 async function render(view) {
+  rememberReviewDrafts();
   isRendering = true;
   setActive(view);
   try {
@@ -104,6 +158,10 @@ async function render(view) {
       await renderStartForm("observation", "Observation Mode");
     } else if (view === "sessions") {
       await renderSessions();
+    } else if (view === "review") {
+      await renderReview(currentSessionId);
+    } else if (view === "trash") {
+      await renderTrash();
     } else {
       await renderSettings();
     }
@@ -211,34 +269,64 @@ async function renderStartForm(mode, heading) {
     await api.post("/api/capture/periodic");
     await refreshStatus();
   });
-  bindBannerStop();
-  bindPauseResume();
 }
 
 async function renderSessions() {
+  rememberReviewDrafts();
+  setActive("sessions");
   title.textContent = "Sessions";
   const data = await api.get("/api/sessions");
-  const rows = data.sessions.map((session) => `
+  app.innerHTML = `<section class="card">
+    <div class="session-filters">
+      <label>Search sessions <input id="session-search" type="search" placeholder="Activity, mode or session ID" value="${escapeAttr(sessionFilters.query)}"></label>
+      <label>From <input id="session-from" type="date" value="${escapeAttr(sessionFilters.from)}"></label>
+      <label>To <input id="session-to" type="date" value="${escapeAttr(sessionFilters.to)}"></label>
+      <button class="secondary" id="clear-session-filters">Clear filters</button>
+      <button class="secondary" id="show-trash">Deleted sessions</button>
+    </div>
+    <p id="session-count" class="muted" role="status"></p><div id="session-rows"></div>
+  </section>`;
+  const updateRows = () => {
+    sessionFilters.query = app.querySelector("#session-search").value;
+    sessionFilters.from = app.querySelector("#session-from").value;
+    sessionFilters.to = app.querySelector("#session-to").value;
+    const terms = sessionFilters.query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const sessions = data.sessions.filter((session) => {
+      const date = session.started.slice(0, 10);
+      const text = `${session.title} ${session.mode} ${session.id}`.toLowerCase();
+      return terms.every((term) => text.includes(term)) && (!sessionFilters.from || date >= sessionFilters.from) && (!sessionFilters.to || date <= sessionFilters.to);
+    });
+    app.querySelector("#session-count").textContent = sessionFilters.from && sessionFilters.to && sessionFilters.from > sessionFilters.to
+      ? "From date must be on or before To date." : `${sessions.length} of ${data.sessions.length} sessions shown`;
+    const rows = sessions.map((session) => `
     <div class="session-row">
       <div>
         <strong>${escapeHtml(session.title)}</strong>
-        <div class="muted">${session.mode} - ${session.started} - ${session.event_count} screenshots</div>
+        <div class="muted">${escapeHtml(session.mode)} - ${escapeHtml(session.started)} - ${session.event_count} screenshots</div>
       </div>
       <div class="row-actions">
-        <button class="secondary" data-open="${session.id}">Review</button>
-        <button class="danger" data-delete-session="${session.id}">Delete</button>
+        <button class="secondary" data-open="${escapeAttr(session.id)}">Review</button>
+        <button class="danger" data-delete-session="${escapeAttr(session.id)}">Move to deleted</button>
       </div>
     </div>
-  `).join("");
-  app.innerHTML = `<section class="card">${rows || "<p class='muted'>No sessions yet.</p>"}</section>`;
-  app.querySelectorAll("[data-open]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      await renderReview(button.dataset.open);
+    `).join("");
+    app.querySelector("#session-rows").innerHTML = rows || "<p class='muted'>No sessions match these filters.</p>";
+    app.querySelectorAll("[data-open]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await renderReview(button.dataset.open);
+      });
     });
-  });
-  app.querySelectorAll("[data-delete-session]").forEach((button) => {
-    button.addEventListener("click", async () => deleteSession(button.dataset.deleteSession));
-  });
+    app.querySelectorAll("[data-delete-session]").forEach((button) => {
+      button.addEventListener("click", async () => deleteSession(button.dataset.deleteSession));
+    });
+  };
+  for (const id of ["session-search", "session-from", "session-to"]) app.querySelector(`#${id}`).addEventListener("input", updateRows);
+  app.querySelector("#clear-session-filters").onclick = () => {
+    for (const id of ["session-search", "session-from", "session-to"]) app.querySelector(`#${id}`).value = "";
+    updateRows();
+  };
+  app.querySelector("#show-trash").onclick = renderTrash;
+  updateRows();
 }
 
 function bindBannerStop() {
@@ -246,10 +334,13 @@ function bindBannerStop() {
   if (!button) {
     return;
   }
-  button.addEventListener("click", async () => {
-    await api.post("/api/record/stop");
-    await render(currentView);
-  });
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      await api.post("/api/record/stop");
+      await render(currentView);
+    } finally { button.disabled = false; }
+  };
 }
 
 function bindPauseResume() {
@@ -257,10 +348,13 @@ function bindPauseResume() {
   if (!button) {
     return;
   }
-  button.addEventListener("click", async () => {
-    await api.post(latestStatus.paused ? "/api/record/resume" : "/api/record/pause");
-    await render(currentView);
-  });
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      await api.post(latestStatus.paused ? "/api/record/resume" : "/api/record/pause");
+      await render(currentView);
+    } finally { button.disabled = false; }
+  };
 }
 
 function renderActiveBanner() {
@@ -278,9 +372,7 @@ function renderActiveBanner() {
     ? `<p class="muted">Skipped unchanged frames: <span data-live-skipped>${escapeHtml(latestStatus.skipped_unchanged || 0)}</span></p>`
     : "";
   const paused = latestStatus.paused ? "Paused" : "Active";
-  const pauseButton = latestStatus.mode === "observation"
-    ? `<button class="secondary" id="banner-pause">${latestStatus.paused ? "Resume" : "Pause"}</button>`
-    : "";
+  const pauseButton = `<button class="secondary" id="banner-pause">${latestStatus.paused ? "Resume" : "Pause"}</button>`;
   return `
     <section class="active-banner">
       <div>
@@ -303,7 +395,7 @@ function renderSystemStatus() {
   const startup = latestStatus.startup || {};
   const exportDestination = latestStatus.export_destination || {};
   const backgroundState = background.enabled
-    ? (background.window_active ? "Capturing window is active" : "Waiting for daily window")
+    ? (background.window_active ? "Scheduled capture block is active" : "Waiting for next scheduled block")
     : "Disabled";
   const changeDetection = background.change_detection ? "skipping unchanged frames" : "saving every frame";
   const exportWarning = exportDestination.warning
@@ -339,6 +431,8 @@ function renderSystemStatus() {
       </div>
       ${exportWarning}
       ${dataWarning}
+      ${latestStatus.capture_error ? `<p class="status-warning">${escapeHtml(latestStatus.capture_error)}</p>` : ""}
+      ${background.error ? `<p class="status-warning">Schedule error: ${escapeHtml(background.error)}</p>` : ""}
     </section>
   `;
 }
@@ -349,13 +443,16 @@ function formatElapsed(seconds) {
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
-async function renderReview(sessionId) {
+async function renderReview(sessionId, preserveVisible = true) {
+  if (preserveVisible) rememberReviewDrafts();
+  setActive("review");
   currentSessionId = sessionId;
   title.textContent = "Review";
   const data = await api.get(`/api/sessions/${sessionId}`);
   const session = data.session;
+  reviewSession = session;
   const metadata = session.metadata || {};
-  const events = session.events || [];
+  const events = (session.events || []).map((event) => ({ ...event, ...reviewDrafts.get(draftKey(sessionId, event.screenshot)) }));
   const visibleEvents = PanoptixReviewFilters.filterReviewEvents(events, reviewFilter, reviewSearch);
   const selectedImageCount = events.filter((event) => event.selected_for_export !== false).length;
   const eventCards = visibleEvents.map((event) => renderEventEditor(session.id, event)).join("");
@@ -370,12 +467,20 @@ async function renderReview(sessionId) {
         <input id="privacy-review-confirmed" type="checkbox">
         Personal data check: I have checked selected screenshots for personal data before submission.
       </label>
+      <label class="check-row">
+        <input id="pack-include-originals" type="checkbox">
+        Include unredacted originals in the evidence pack (reveals data hidden by redactions).
+      </label>
+      <p class="muted">Unsaved notes and selections stay in this tab when you filter or navigate. Export saves these edits.</p>
+      <p id="draft-status" role="status" aria-live="polite"></p>
       <div class="actions">
-        <button class="primary" id="export-session">Export HTML</button>
+        <button class="primary" id="save-all-notes">Save all notes</button>
+        <button class="secondary" id="open-export-folder">Open export folder</button>
+        <button class="primary" id="export-session">Export HTML / PDF</button>
         <button class="secondary" id="export-pack">Export evidence pack</button>
         <button class="secondary" id="verify-pack">Verify evidence pack</button>
         <button class="secondary" id="export-annotated-images">Export selected annotated images</button>
-        <button class="secondary" id="export-original-images">Export selected clean images</button>
+        <button class="secondary" id="export-original-images">Export selected unredacted originals</button>
         <button class="secondary" id="export-both-images">Export both image versions</button>
         <button class="secondary" id="back-sessions">Back to sessions</button>
       </div>
@@ -403,6 +508,18 @@ async function renderReview(sessionId) {
     </section>
   `;
   app.querySelector("#back-sessions").addEventListener("click", renderSessions);
+  app.querySelector("#open-export-folder").onclick = () => api.post("/api/exports/open-folder", { session_id: sessionId });
+  app.querySelector("#save-all-notes").onclick = async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      await saveReviewDrafts(sessionId);
+      await renderReview(sessionId, false);
+    } finally { updateDraftIndicator(); }
+  };
+  app.querySelectorAll("[data-zoom-event]").forEach((button) => {
+    button.onclick = () => openScreenshotViewer(sessionId, session.events.find((event) => String(event.index) === button.dataset.zoomEvent));
+  });
+  updateDraftIndicator();
   app.querySelector("#export-session").addEventListener("click", async () => exportSession(sessionId));
   app.querySelector("#export-pack").addEventListener("click", async () => exportEvidencePack(sessionId));
   app.querySelector("#verify-pack").addEventListener("click", async () => verifyEvidencePack(sessionId));
@@ -469,6 +586,7 @@ function renderEventEditor(sessionId, event) {
     <article class="card event-editor">
       <div>
         <img class="event-thumb" src="${imageUrl}" alt="Screenshot ${escapeAttr(event.index || "")}">
+        <button class="secondary" data-zoom-event="${event.index}">Zoom / drag to redact</button>
         <p class="muted">${escapeHtml(event.type)} - ${escapeHtml(event.timestamp || "")}</p>
         ${redactionLabel}
       </div>
@@ -550,31 +668,53 @@ function renderEventMarkerEditor(event) {
 }
 
 async function saveEvent(sessionId, eventIndex) {
-  const fields = app.querySelectorAll(`[data-event="${eventIndex}"]`);
-  const payload = {};
-  fields.forEach((field) => {
-    const key = field.dataset.field;
-    if (key === "tags") {
-      payload.tags = field.value.split(",").map((tag) => tag.trim()).filter(Boolean);
-    } else if (key === "highlight") {
-      payload.highlight = field.checked;
-    } else if (key === "selected_for_export") {
-      payload.selected_for_export = field.checked;
-    } else {
-      payload[key] = field.value;
-    }
+  rememberReviewDrafts();
+  const event = reviewSession.events.find((item) => String(item.index) === String(eventIndex));
+  await persistReviewDraft(sessionId, event.screenshot);
+  await renderReview(sessionId, false);
+}
+
+async function persistReviewDraft(sessionId, screenshot) {
+  const key = draftKey(sessionId, screenshot);
+  const draft = { ...reviewDrafts.get(key) };
+  if (!Object.keys(draft).length) return;
+  const latest = (await api.get(`/api/sessions/${sessionId}`)).session;
+  const event = latest.events.find((item) => item.screenshot === screenshot);
+  if (!event) throw new Error("This screenshot was removed elsewhere. Your unsaved note is still in this tab.");
+  const result = await api.patch(`/api/sessions/${sessionId}/events/${event.index}`, { ...draft, expected_screenshot: screenshot });
+  // Keep edits typed while the save was in flight.
+  const remaining = { ...reviewDrafts.get(key) };
+  Object.keys(draft).forEach((field) => {
+    if (JSON.stringify(remaining[field]) === JSON.stringify(draft[field])) delete remaining[field];
   });
-  await api.patch(`/api/sessions/${sessionId}/events/${eventIndex}`, payload);
-  await renderReview(sessionId);
+  if (Object.keys(remaining).length) reviewDrafts.set(key, remaining);
+  else reviewDrafts.delete(key);
+  reviewSession = result.session;
+  updateDraftIndicator();
+}
+
+async function saveReviewDrafts(sessionId) {
+  rememberReviewDrafts();
+  for (const key of [...reviewDrafts.keys()]) {
+    if (key.startsWith(`${sessionId}/`)) await persistReviewDraft(sessionId, key.slice(sessionId.length + 1));
+  }
+  reviewSession = (await api.get(`/api/sessions/${sessionId}`)).session;
 }
 
 async function bulkSelectEvents(session, mode) {
+  rememberReviewDrafts();
   const events = session.events || [];
   for (const event of events) {
     const selected = mode === "all" || (mode === "highlights" && event.highlight);
-    await api.patch(`/api/sessions/${session.id}/events/${event.index}`, { selected_for_export: selected });
+    await api.patch(`/api/sessions/${session.id}/events/${event.index}`, { selected_for_export: Boolean(selected), expected_screenshot: event.screenshot });
+    const key = draftKey(session.id, event.screenshot);
+    const draft = reviewDrafts.get(key);
+    if (draft) {
+      delete draft.selected_for_export;
+      if (!Object.keys(draft).length) reviewDrafts.delete(key);
+    }
   }
-  await renderReview(session.id);
+  await renderReview(session.id, false);
 }
 
 function requirePrivacyReview() {
@@ -588,7 +728,7 @@ function requirePrivacyReview() {
 }
 
 function requireSelectedScreenshots() {
-  const selectedCount = app.querySelectorAll('[data-field="selected_for_export"]:checked').length;
+  const selectedCount = (reviewSession?.events || []).filter((event) => event.selected_for_export !== false).length;
   if (selectedCount > 0) {
     return true;
   }
@@ -600,6 +740,8 @@ async function exportSession(sessionId) {
   if (!requirePrivacyReview()) {
     return;
   }
+  await saveReviewDrafts(sessionId);
+  if (!requireSelectedScreenshots()) return;
   const result = await api.post(`/api/sessions/${sessionId}/export`);
   alert(`Exported HTML: ${result.html}\nExported PDF: ${result.pdf}`);
 }
@@ -608,6 +750,8 @@ async function exportImages(sessionId, variant) {
   if (!requirePrivacyReview()) {
     return;
   }
+  if (variant !== "annotated" && !confirmOriginalExport()) return;
+  await saveReviewDrafts(sessionId);
   if (!requireSelectedScreenshots()) {
     return;
   }
@@ -619,8 +763,16 @@ async function exportEvidencePack(sessionId) {
   if (!requirePrivacyReview()) {
     return;
   }
-  const result = await api.post(`/api/sessions/${sessionId}/export-pack`, {});
+  const includeOriginals = app.querySelector("#pack-include-originals")?.checked === true;
+  if (includeOriginals && !confirmOriginalExport()) return;
+  await saveReviewDrafts(sessionId);
+  if (!requireSelectedScreenshots()) return;
+  const result = await api.post(`/api/sessions/${sessionId}/export-pack`, { include_originals: includeOriginals });
   alert(`Exported evidence pack: ${result.zip}`);
+}
+
+function confirmOriginalExport() {
+  return confirm("This export includes UNREDACTED originals. Personal data hidden by black boxes will be visible to recipients. Include these originals?");
 }
 
 async function verifyEvidencePack(sessionId) {
@@ -646,8 +798,11 @@ async function deleteEvent(sessionId, eventIndex) {
   if (!confirm("Remove this screenshot from the report? The original image file stays in local storage for now.")) {
     return;
   }
+  rememberReviewDrafts();
+  const screenshot = reviewSession.events.find((event) => String(event.index) === String(eventIndex))?.screenshot;
   await api.delete(`/api/sessions/${sessionId}/events/${eventIndex}`);
-  await renderReview(sessionId);
+  reviewDrafts.delete(draftKey(sessionId, screenshot));
+  await renderReview(sessionId, false);
 }
 
 async function redactPreset(sessionId, eventIndex, preset) {
@@ -688,14 +843,166 @@ async function restoreOriginal(sessionId, eventIndex) {
 }
 
 async function deleteSession(sessionId) {
-  if (!confirm("Delete this session and its local screenshots? This cannot be undone.")) {
+  if (!confirm("Move this session and its local screenshots/exports to Deleted sessions? You can restore saved evidence there. Unsaved drafts for this session will be discarded. Reports exported to other folders stay where they are.")) {
     return;
   }
   await api.delete(`/api/sessions/${sessionId}`);
+  for (const key of reviewDrafts.keys()) if (key.startsWith(`${sessionId}/`)) reviewDrafts.delete(key);
   await renderSessions();
 }
 
+function showDialog(contents, className = "") {
+  const dialog = document.createElement("dialog");
+  dialog.className = `app-dialog ${className}`;
+  dialog.setAttribute("aria-labelledby", "dialog-title");
+  dialog.innerHTML = contents;
+  dialog.addEventListener("close", () => dialog.remove(), { once: true });
+  dialog.querySelector("[data-close-dialog]").onclick = () => dialog.close();
+  document.body.append(dialog);
+  dialog.showModal();
+  return dialog;
+}
+
+async function renderTrash() {
+  rememberReviewDrafts();
+  setActive("trash");
+  title.textContent = "Deleted sessions";
+  const data = await api.get("/api/trash");
+  app.innerHTML = `<section class="card">
+    <h2>Restore deleted sessions</h2>
+    <p class="muted">Sessions, screenshots and local exports are kept here until restored. They still use disk space; there is no automatic permanent deletion. Reports exported to other folders are unaffected.</p>
+    <button class="secondary" id="back-sessions">Back to sessions</button>
+    ${data.sessions.map((entry) => `<div class="session-row">
+      <div><strong>${escapeHtml(entry.title)}</strong><p class="muted">Deleted ${escapeHtml(entry.deleted_at)}</p></div>
+      <button class="primary" data-restore-session="${escapeAttr(entry.trash_id)}">Restore</button>
+    </div>`).join("") || "<p>No deleted sessions.</p>"}
+  </section>`;
+  app.querySelector("#back-sessions").onclick = renderSessions;
+  app.querySelectorAll("[data-restore-session]").forEach((button) => {
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        await api.post(`/api/trash/${button.dataset.restoreSession}/restore`);
+        await renderTrash();
+      } finally { button.disabled = false; }
+    };
+  });
+}
+
+async function previewRetention() {
+  const preview = await api.get("/api/retention/preview");
+  const dialog = showDialog(`<h2 id="dialog-title">Retention cleanup preview</h2>
+    <p>${preview.sessions.length} session${preview.sessions.length === 1 ? "" : "s"} started before ${escapeHtml(preview.cutoff)} (${preview.retention_days} days).</p>
+    <p>These will move to Deleted sessions and can be restored. Disk space is retained. The active recording is protected.</p>
+    <div class="cleanup-list">${preview.sessions.map((session) => `<p><strong>${escapeHtml(session.title)}</strong><br>${escapeHtml(session.started)} · ${session.event_count} screenshots</p>`).join("") || "<p>No sessions are eligible.</p>"}</div>
+    <div class="actions"><button class="danger" id="confirm-cleanup" ${preview.sessions.length ? "" : "disabled"}>Move ${preview.sessions.length} sessions to deleted</button><button class="secondary" data-close-dialog>Cancel</button></div>`);
+  let cleaning = false;
+  dialog.addEventListener("cancel", (event) => { if (cleaning) event.preventDefault(); });
+  dialog.querySelector("#confirm-cleanup").onclick = async (event) => {
+    const button = event.currentTarget;
+    cleaning = true;
+    button.disabled = true;
+    dialog.querySelector("[data-close-dialog]").disabled = true;
+    try {
+      await api.post("/api/retention/cleanup", { session_ids: preview.sessions.map((session) => session.id) });
+      dialog.close();
+      await renderTrash();
+    } finally {
+      cleaning = false;
+      button.disabled = false;
+      dialog.querySelector("[data-close-dialog]").disabled = false;
+    }
+  };
+}
+
+function openScreenshotViewer(sessionId, event) {
+  const url = `/api/sessions/${encodeURIComponent(sessionId)}/screenshots/${encodeURIComponent(event.screenshot)}`;
+  const dialog = showDialog(`<h2 id="dialog-title">Screenshot ${event.index}</h2>
+    <div class="actions viewer-tools">
+      <label>Zoom <select id="image-zoom"><option value="fit">Fit</option><option value="1">100%</option><option value="1.5">150%</option><option value="2">200%</option><option value="4">400%</option></select></label>
+      <button class="danger" id="apply-drag-redaction" disabled>Apply redaction</button>
+      <button class="secondary" id="clear-drag-selection">Clear selection</button>
+      <button class="secondary" data-close-dialog>Close</button>
+    </div>
+    <p id="selection-status" role="status">Drag over the image to select a black redaction box. Zoom in and scroll for detail, or use the coordinate fields in Review.</p>
+    <div class="image-viewport"><div class="image-stage"><img class="zoom-image" alt="Screenshot ${event.index}" draggable="false"><div class="drag-selection" hidden></div></div></div>`, "image-dialog");
+  const image = dialog.querySelector(".zoom-image");
+  const viewport = dialog.querySelector(".image-viewport");
+  const overlay = dialog.querySelector(".drag-selection");
+  const apply = dialog.querySelector("#apply-drag-redaction");
+  const feedback = dialog.querySelector("#selection-status");
+  let start = null, selection = null, scale = 1, modified = false, busy = false;
+  const drawSelection = () => {
+    overlay.hidden = !selection;
+    if (selection) Object.assign(overlay.style, { left: `${selection.x * scale}px`, top: `${selection.y * scale}px`, width: `${selection.width * scale}px`, height: `${selection.height * scale}px` });
+    apply.disabled = !selection || busy;
+    dialog.querySelector("[data-close-dialog]").disabled = busy;
+    dialog.querySelector("#image-zoom").disabled = busy;
+    dialog.querySelector("#clear-drag-selection").disabled = busy;
+  };
+  const zoom = () => {
+    if (!image.naturalWidth) return;
+    const value = dialog.querySelector("#image-zoom").value;
+    scale = value === "fit" ? Math.min(1, (viewport.clientWidth - 16) / image.naturalWidth, window.innerHeight * 0.6 / image.naturalHeight) : Number(value);
+    image.style.width = `${image.naturalWidth * scale}px`;
+    image.style.height = `${image.naturalHeight * scale}px`;
+    drawSelection();
+  };
+  const point = (pointer) => {
+    const bounds = image.getBoundingClientRect();
+    return { x: Math.max(0, Math.min(image.naturalWidth, (pointer.clientX - bounds.left) * image.naturalWidth / bounds.width)), y: Math.max(0, Math.min(image.naturalHeight, (pointer.clientY - bounds.top) * image.naturalHeight / bounds.height)) };
+  };
+  image.onload = zoom;
+  image.onerror = () => { feedback.textContent = "The screenshot could not be loaded."; apply.disabled = true; };
+  image.src = `${url}?v=${Date.now()}`;
+  dialog.querySelector("#image-zoom").onchange = zoom;
+  image.onpointerdown = (pointer) => {
+    if (busy || pointer.button !== 0 || !image.naturalWidth) return;
+    pointer.preventDefault();
+    start = point(pointer);
+    selection = null;
+    image.setPointerCapture(pointer.pointerId);
+    drawSelection();
+  };
+  image.onpointermove = (pointer) => {
+    if (!start) return;
+    const end = point(pointer);
+    const x = Math.floor(Math.min(start.x, end.x)), y = Math.floor(Math.min(start.y, end.y));
+    const width = Math.ceil(Math.max(start.x, end.x)) - x, height = Math.ceil(Math.max(start.y, end.y)) - y;
+    selection = width > 0 && height > 0 ? { x, y, width, height } : null;
+    drawSelection();
+    if (selection) feedback.textContent = `Selected x ${x}, y ${y}, width ${width}, height ${height} pixels. Apply redaction to save it.`;
+  };
+  image.onpointerup = (pointer) => {
+    if (!start) return;
+    image.onpointermove(pointer);
+    start = null;
+    if (image.hasPointerCapture(pointer.pointerId)) image.releasePointerCapture(pointer.pointerId);
+  };
+  image.onpointercancel = () => { start = null; selection = null; drawSelection(); };
+  dialog.querySelector("#clear-drag-selection").onclick = () => {
+    start = null; selection = null; drawSelection();
+    feedback.textContent = "Selection cleared. Drag to select another area.";
+  };
+  apply.onclick = async () => {
+    if (!selection || busy) return;
+    busy = true; drawSelection();
+    try {
+      await api.post(`/api/sessions/${sessionId}/events/${event.index}/redact`, { rect: selection, expected_screenshot: event.screenshot });
+      modified = true; selection = null;
+      image.src = `${url}?v=${Date.now()}`;
+      feedback.textContent = "Redaction saved. Select another area or close to return to Review.";
+    } finally { busy = false; drawSelection(); }
+  };
+  dialog.addEventListener("close", () => {
+    if (modified && currentView === "review" && currentSessionId === sessionId) renderReview(sessionId);
+  });
+  dialog.addEventListener("cancel", (event) => { if (busy) event.preventDefault(); });
+}
+
 async function renderSettings() {
+  rememberReviewDrafts();
+  setActive("settings");
   title.textContent = "Settings";
   const data = await api.get("/api/settings");
   const storageData = await api.get("/api/storage");
@@ -718,7 +1025,7 @@ async function renderSettings() {
       <p class="muted">${escapeHtml(warningText)}</p>
       <p class="muted">${escapeHtml(storage.root)}</p>
       <div class="actions">
-        <button class="danger" id="cleanup-retention">Delete sessions older than retention period</button>
+        <button class="secondary" id="cleanup-retention">Preview retention cleanup</button>
       </div>
     </section>
     ${renderSystemStatus()}
@@ -728,9 +1035,10 @@ async function renderSettings() {
       ${saveFeedback}
       <label>Observation screenshot interval seconds <input name="observation_interval_seconds" type="number" min="5" value="${escapeAttr(settings.observation_interval_seconds)}"></label>
       <h2>Scheduled passive capture</h2>
-      <label class="check-row"><input name="background_enabled" type="checkbox" ${settings.background_enabled ? "checked" : ""}> Start passive capture during the daily window</label>
-      <label>Daily start time <input name="background_start_time" type="time" value="${escapeAttr(settings.background_start_time)}"></label>
-      <label>Daily end time <input name="background_end_time" type="time" value="${escapeAttr(settings.background_end_time)}"></label>
+      <label class="check-row"><input name="background_enabled" type="checkbox" ${settings.background_enabled ? "checked" : ""}> Enable automated capture using the weekly timetable</label>
+      <h3>Weekly recording timetable</h3>
+      ${settings.background_weekly_schedule == null ? `<p class="muted">Your existing daily schedule (${escapeHtml(settings.background_start_time)}–${escapeHtml(settings.background_end_time)}) stays active until you save. The grid rounds any partial half-hours outwards.</p>` : ""}
+      <div id="weekly-schedule"></div>
       <label>Passive screenshot interval seconds <input name="background_interval_seconds" type="number" min="1" value="${escapeAttr(settings.background_interval_seconds)}"></label>
       <label class="check-row"><input name="background_change_detection" type="checkbox" ${settings.background_change_detection ? "checked" : ""}> Skip unchanged passive screenshots</label>
       <label>Change sensitivity threshold <input name="background_change_threshold" type="number" min="1" value="${escapeAttr(settings.background_change_threshold)}"></label>
@@ -768,14 +1076,14 @@ async function renderSettings() {
       </div>
     </form>
   `;
+  const timetable = PanoptixWeeklySchedule.mount(app.querySelector("#weekly-schedule"), data.timetable);
   app.querySelector("#settings-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     await api.patch("/api/settings", {
       observation_interval_seconds: Number(form.get("observation_interval_seconds")),
       background_enabled: form.get("background_enabled") === "on",
-      background_start_time: form.get("background_start_time"),
-      background_end_time: form.get("background_end_time"),
+      background_weekly_schedule: timetable.value(),
       background_interval_seconds: Number(form.get("background_interval_seconds")),
       background_change_detection: form.get("background_change_detection") === "on",
       background_change_threshold: Number(form.get("background_change_threshold")),
@@ -815,14 +1123,7 @@ async function renderSettings() {
   app.querySelector("#reset-data-directory").addEventListener("click", async () => {
     await saveDataDirectory("");
   });
-  app.querySelector("#cleanup-retention").addEventListener("click", async () => {
-    if (!confirm(`Delete sessions older than ${settings.retention_days} days? This removes local screenshots and exports.`)) {
-      return;
-    }
-    const result = await api.post("/api/retention/cleanup", {});
-    alert(`Deleted ${result.deleted.length} old session${result.deleted.length === 1 ? "" : "s"}.`);
-    await renderSettings();
-  });
+  app.querySelector("#cleanup-retention").onclick = previewRetention;
 }
 
 function renderDataLocationCard(dataLocation) {
@@ -868,12 +1169,15 @@ async function browseForFolder(initial) {
 }
 
 async function saveDataDirectory(directory) {
+  if (reviewDrafts.size && !confirm("Changing the screenshot folder discards unsaved review drafts in this tab. Continue?")) return;
   const response = await api.patch("/api/data-location", { directory });
   if (response.error) {
     alert(response.error);
     return;
   }
   const updated = response.data_location || {};
+  reviewDrafts.clear();
+  reviewSession = null;
   dataLocationFeedback = updated.restart_required
     ? "Screenshot folder saved. Restart Panoptix to start using it."
     : `Screenshot folder saved. New screenshots are going to ${updated.active_path} now.`;
@@ -910,6 +1214,8 @@ async function pollStatus() {
     await refreshStatus();
   } catch (error) {
     // A dropped poll must not kill the timer; the next tick retries.
+    statusPill.textContent = "Cannot reach Panoptix - recording status is unknown";
+    statusPill.classList.toggle("active", false);
     console.warn("Status poll failed", error);
   }
 }

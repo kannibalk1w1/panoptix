@@ -59,18 +59,19 @@ class AnnotationTests(unittest.TestCase):
                     "original_screenshot": "originals/001.png",
                     "x": 40,
                     "y": 40,
-                    "redactions": [{"type": "black_box"}],
+                    "redactions": [{"type": "black_box", "x": 0, "y": 0, "width": 10, "height": 10}],
                 },
             )
 
             result = update_event_marker(store, session["id"], 1, {"shape": "crosshair", "color": "#0000ff", "size": 20})
 
             self.assertEqual(result["event"]["marker"]["shape"], "crosshair")
-            self.assertEqual(result["event"]["redactions"], [])
+            self.assertEqual(len(result["event"]["redactions"]), 1)
             with Image.open(original) as image:
                 self.assertEqual(image.getpixel((40, 40)), (255, 255, 255))
             with Image.open(annotated) as image:
                 self.assertNotEqual(image.getpixel((40, 40)), (255, 255, 255))
+                self.assertEqual(image.getpixel((5, 5)), (0, 0, 0))
 
 
 if __name__ == "__main__":

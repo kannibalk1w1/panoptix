@@ -23,7 +23,7 @@ class StartupManager:
 
     def _command(self) -> str:
         target = str(self.app_path)
-        if target.lower().endswith(".exe"):
+        if getattr(sys, "frozen", False) or Path(target).name.lower() == "panoptix.exe":
             return f'@echo off\nstart "" "{target}" --background\n'
         script = Path(__file__).resolve().parents[1] / "panoptix.py"
         return f'@echo off\nstart "" "{target}" "{script}" --background\n'

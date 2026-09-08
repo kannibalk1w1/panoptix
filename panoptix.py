@@ -23,14 +23,17 @@ def main() -> None:
     parser.add_argument("--background", action="store_true")
     args = parser.parse_args()
     url = f"http://{HOST}:{PORT}"
-    if not args.background:
+    def open_dashboard() -> None:
+        if args.background:
+            return
         try:
             webbrowser.open(url)
         except Exception:
             pass
     if is_already_running():
+        open_dashboard()
         return
-    run_server(get_data_root(), host=HOST, port=PORT)
+    run_server(get_data_root(), host=HOST, port=PORT, on_ready=open_dashboard)
 
 
 if __name__ == "__main__":

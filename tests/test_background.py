@@ -54,16 +54,20 @@ class BackgroundTests(unittest.TestCase):
         class FakeRecorder:
             def __init__(self):
                 self.active_mode = None
+                self.active_session_id = None
                 self.started = []
                 self.stopped = 0
 
             def start(self, mode, metadata, settings):
                 self.active_mode = mode
+                self.active_session_id = "scheduled-test"
                 self.started.append((mode, metadata, settings))
+                return {"id": self.active_session_id}
 
-            def stop(self):
+            def stop(self, expected_session_id=None):
                 self.stopped += 1
                 self.active_mode = None
+                self.active_session_id = None
 
         settings = FakeSettings()
         recorder = FakeRecorder()

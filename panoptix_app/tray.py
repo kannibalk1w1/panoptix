@@ -35,7 +35,10 @@ def start_tray(url: str, recorder: Any, settings_store: Any, server: Any):
         recorder.resume()
 
     def manual_capture(icon=None, item=None) -> None:
-        recorder.capture_manual_hotkey()
+        try:
+            recorder.capture_manual_hotkey()
+        except Exception:
+            pass  # Recorder exposes capture failures in dashboard status.
 
     def stop_capture(icon=None, item=None) -> None:
         recorder.stop()

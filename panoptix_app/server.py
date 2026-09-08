@@ -4,7 +4,7 @@ import json
 import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import unquote, urlparse
 
 from .annotation import update_event_marker
@@ -16,6 +16,7 @@ from .app_paths import (
     resolve_data_root,
 )
 from .background import BackgroundScheduler, daily_window_is_active
+from .schedule import timetable_for_editor
 from .folder_picker import pick_folder
 from .exporter import (
     EvidencePackExporter,
@@ -27,7 +28,8 @@ from .exporter import (
 from .hotkeys import HotkeyService
 from .redaction import redact_event_screenshot, restore_original_screenshot
 from .recorder import Recorder
-from .retention import cleanup_old_sessions
+from .retention import cleanup_old_sessions, preview_cleanup
+from .open_folder import open_folder
 from .settings import SettingsStore
 from .startup import StartupManager
 from .storage import SessionStore
@@ -46,18 +48,26 @@ class DataContext:
         self.settings_store = settings_store or SettingsStore(self.root)
 
     def switch_root(self, new_root: Path) -> bool:
+        with self.recorder._lock:
+            if self.recorder.active_session_id is not None:
+                raise ValueError("Stop the current recording before changing the screenshot folder.")
+            return self._switch_root(new_root)
+
+    def _switch_root(self, new_root: Path) -> bool:
         new_root = Path(new_root)
         if new_root == self.root:
             return False
         # Carry the current settings across so switching folders does not silently
         # reset the capture schedule, hotkey and marker preferences.
         settings = self.settings_store.load()
+        new_store = SessionStore(new_root)
+        new_settings = SettingsStore(new_root)
+        if not new_settings.path.exists():
+            new_settings.update(settings)
         self.root = new_root
-        self.store = SessionStore(new_root)
-        self.recorder.store = self.store
+        self.store = new_store
+        self.recorder.store = new_store
         self.settings_store.set_root(new_root)
-        if not self.settings_store.path.exists():
-            self.settings_store.update(settings)
         return True
 
 
@@ -68,6 +78,7 @@ def create_handler(
     hotkeys: HotkeyService | None = None,
     startup: StartupManager | None = None,
     settings_store: SettingsStore | None = None,
+    scheduler: BackgroundScheduler | None = None,
 ):
     frontend_dir = get_project_root() / "frontend"
     context = DataContext(root, store, recorder, settings_store)
@@ -79,17 +90,24 @@ def create_handler(
         return status
 
     def app_status() -> dict[str, Any]:
-        settings = context.settings_store.load()
+        storage_error = None
+        try:
+            settings = context.settings_store.load()
+        except (OSError, ValueError) as exc:
+            settings = context.settings_store.last_good
+            storage_error = str(exc)
         status = recorder.status()
+        status["storage_error"] = storage_error
         status["background"] = {
             "enabled": bool(settings.get("background_enabled")),
-            "window": f"{settings.get('background_start_time')}-{settings.get('background_end_time')}",
+            "window": "Weekly timetable" if settings.get("background_weekly_schedule") is not None else f"{settings.get('background_start_time')}-{settings.get('background_end_time')}",
             "start_time": settings.get("background_start_time"),
             "end_time": settings.get("background_end_time"),
             "interval_seconds": settings.get("background_interval_seconds"),
             "change_detection": bool(settings.get("background_change_detection")),
             "change_threshold": settings.get("background_change_threshold"),
             "window_active": daily_window_is_active(settings),
+            "error": scheduler.error if scheduler else None,
         }
         status["hotkey"] = {
             "enabled": bool(settings.get("manual_hotkey_enabled")),
@@ -100,8 +118,14 @@ def create_handler(
             "requested": bool(settings.get("launch_on_startup")),
             "installed": startup.is_enabled() if startup is not None else False,
         }
-        status["export_destination"] = export_destination_status(context.root)
-        status["data_location"] = data_location_status()
+        try:
+            status["export_destination"] = export_destination_status(context.root)
+        except (OSError, ValueError) as exc:
+            status["export_destination"] = {"warning": str(exc), "writable": False}
+        try:
+            status["data_location"] = data_location_status()
+        except (OSError, ValueError) as exc:
+            status["data_location"] = {"active_path": str(context.root), "warning": str(exc)}
         return status
 
     class PanoptixHandler(BaseHTTPRequestHandler):
@@ -111,7 +135,8 @@ def create_handler(
                 if path == "/api/status":
                     self._json(app_status())
                 elif path == "/api/settings":
-                    self._json({"settings": context.settings_store.load()})
+                    settings = context.settings_store.load()
+                    self._json({"settings": settings, "timetable": timetable_for_editor(settings)})
                 elif path == "/api/data-location":
                     self._json({"data_location": data_location_status()})
                 elif path == "/api/storage":
@@ -119,6 +144,11 @@ def create_handler(
                     self._json({"storage": get_storage_usage(context.root, settings["storage_warning_mb"])})
                 elif path == "/api/sessions":
                     self._json({"sessions": context.store.list_sessions()})
+                elif path == "/api/trash":
+                    self._json({"sessions": context.store.list_trash()})
+                elif path == "/api/retention/preview":
+                    with recorder._lock:
+                        self._json(preview_cleanup(context.store, context.settings_store.load()["retention_days"], protected_session_id=recorder.active_session_id))
                 elif path.startswith("/api/sessions/") and "/screenshots/" in path:
                     self._screenshot(path)
                 elif path.startswith("/api/sessions/"):
@@ -163,7 +193,7 @@ def create_handler(
                     self._json({"zip": str(output)})
                 elif path.startswith("/api/sessions/") and path.endswith("/export-pack"):
                     session_id = unquote(path.split("/")[-2])
-                    output = EvidencePackExporter(context.root).export(session_id)
+                    output = EvidencePackExporter(context.root).export(session_id, include_originals=payload.get("include_originals") is True)
                     self._json({"zip": str(output)})
                 elif path.startswith("/api/sessions/") and path.endswith("/verify-pack"):
                     session_id = unquote(path.split("/")[-2])
@@ -178,6 +208,7 @@ def create_handler(
                         event_index,
                         rect=payload.get("rect"),
                         preset=payload.get("preset"),
+                        expected_screenshot=payload.get("expected_screenshot"),
                     )
                     self._json(result)
                 elif path.startswith("/api/sessions/") and path.endswith("/marker"):
@@ -192,9 +223,22 @@ def create_handler(
                     self._json(restore_original_screenshot(context.store, session_id, event_index))
                 elif path == "/api/browse-folder":
                     self._json({"result": pick_folder(str(payload.get("initial", "")))})
+                elif path == "/api/exports/open-folder":
+                    session_id = payload.get("session_id")
+                    if session_id:
+                        context.store.load_session(session_id)
+                    destination = export_destination_status(context.root, session_id)
+                    open_folder(Path(destination["path"]))
+                    self._json({"path": destination["path"]})
+                elif path.startswith("/api/trash/") and path.endswith("/restore"):
+                    self._json({"session": context.store.restore_session(unquote(path.split("/")[3]))})
                 elif path == "/api/retention/cleanup":
                     settings = context.settings_store.load()
-                    self._json(cleanup_old_sessions(context.store, settings["retention_days"]))
+                    with recorder._lock:
+                        ids = payload.get("session_ids")
+                        if ids is not None and (not isinstance(ids, list) or not all(isinstance(item, str) for item in ids)):
+                            raise ValueError("Expected a list of session ids")
+                        self._json(cleanup_old_sessions(context.store, settings["retention_days"], protected_session_id=recorder.active_session_id, session_ids=ids))
                 else:
                     self.send_error(404)
             except Exception as exc:
@@ -207,21 +251,24 @@ def create_handler(
                     updated_settings = context.settings_store.update(self._payload())
                     if startup is not None:
                         startup.set_enabled(bool(updated_settings.get("launch_on_startup")))
-                    self._json({"settings": updated_settings})
                     if hotkeys is not None:
                         hotkeys.restart()
+                    self._json({"settings": updated_settings})
                 elif path == "/api/data-location":
                     directory = str(self._payload().get("directory", "")).strip()
                     if directory:
                         problem = directory_problem(normalize_directory(directory))
                         if problem:
                             raise ValueError(f"That folder cannot be used: {problem}")
-                    if recorder.status()["active"]:
-                        raise ValueError(
-                            "Stop the current recording before changing the screenshot folder."
-                        )
-                    set_configured_data_directory(directory)
-                    context.switch_root(Path(resolve_data_root()["path"]))
+                    with recorder._lock:
+                        if recorder.active_session_id is not None:
+                            raise ValueError("Stop the current recording before changing the screenshot folder.")
+                        set_configured_data_directory(directory)
+                        context.switch_root(Path(resolve_data_root()["path"]))
+                    if hotkeys is not None:
+                        hotkeys.restart()
+                    if startup is not None:
+                        startup.set_enabled(bool(context.settings_store.load().get("launch_on_startup")))
                     self._json({"data_location": data_location_status()})
                 elif path.startswith("/api/sessions/") and "/events/" in path:
                     parts = path.split("/")
@@ -248,7 +295,7 @@ def create_handler(
                     self._json({"session": context.store.delete_event(session_id, event_index)})
                 elif path.startswith("/api/sessions/"):
                     session_id = unquote(path.removeprefix("/api/sessions/"))
-                    context.store.delete_session(session_id)
+                    recorder.delete_session(session_id)
                     self._json({"ok": True})
                 else:
                     self.send_error(404)
@@ -281,7 +328,7 @@ def create_handler(
         def _static(self, path: str) -> None:
             relative = "index.html" if path in ("", "/") else path.lstrip("/")
             target = (frontend_dir / relative).resolve()
-            if not str(target).startswith(str(frontend_dir.resolve())) or not target.exists():
+            if not target.is_relative_to(frontend_dir.resolve()) or not target.is_file():
                 self.send_error(404)
                 return
             body = target.read_bytes()
@@ -299,13 +346,16 @@ def create_handler(
             if "/" in filename or "\\" in filename or not filename.endswith(".png"):
                 self.send_error(404)
                 return
-            target = context.store.screenshot_dir(session_id) / filename
-            if not target.exists():
-                self.send_error(404)
-                return
-            body = target.read_bytes()
+            with context.store.transaction():
+                context.store.load_session(session_id)
+                target = context.store.screenshot_dir(session_id) / filename
+                if not target.exists():
+                    self.send_error(404)
+                    return
+                body = target.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -313,7 +363,7 @@ def create_handler(
     return PanoptixHandler
 
 
-def run_server(root: Path, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
+def run_server(root: Path, host: str = "127.0.0.1", port: int = 8765, on_ready: Callable | None = None) -> ThreadingHTTPServer:
     root = Path(root)
     store = SessionStore(root)
     recorder = Recorder(store)
@@ -321,20 +371,25 @@ def run_server(root: Path, host: str = "127.0.0.1", port: int = 8765) -> Threadi
     scheduler = BackgroundScheduler(recorder, settings_store)
     hotkeys = HotkeyService(settings_store, recorder)
     startup = StartupManager()
-    scheduler.start()
-    hotkeys.start()
-    startup.set_enabled(bool(settings_store.load().get("launch_on_startup")))
     # The scheduler and hotkey service share this settings store, so they follow
     # the handler when the screenshot folder is changed at runtime.
-    handler = create_handler(root, store, recorder, hotkeys, startup, settings_store)
+    handler = create_handler(root, store, recorder, hotkeys, startup, settings_store, scheduler)
     server = ThreadingHTTPServer((host, port), handler)
-    tray_icon = start_tray(f"http://{host}:{server.server_address[1]}", recorder, settings_store, server)
-    print(f"Panoptix running at http://{host}:{server.server_address[1]}")
+    tray_icon = None
     try:
+        scheduler.start()
+        hotkeys.start()
+        startup.set_enabled(bool(settings_store.load().get("launch_on_startup")))
+        tray_icon = start_tray(f"http://{host}:{server.server_address[1]}", recorder, settings_store, server)
+        print(f"Panoptix running at http://{host}:{server.server_address[1]}")
+        if on_ready:
+            on_ready()
         server.serve_forever()
     finally:
         if tray_icon is not None:
             tray_icon.stop()
         hotkeys.stop()
         scheduler.stop()
+        recorder.stop()
+        server.server_close()
     return server

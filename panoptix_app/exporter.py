@@ -5,12 +5,14 @@ import csv
 import hashlib
 import html
 import json
+import re
 from io import StringIO
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED, BadZipFile
 
 from .settings import SettingsStore
 from .storage import SessionStore
+from .persistence import synchronized, atomic_output
 
 
 def selected_events(session: dict) -> list[dict]:
@@ -86,11 +88,13 @@ class HtmlExporter:
         self.root = Path(root)
         self.store = SessionStore(self.root)
 
+    @synchronized
     def export(self, session_id: str) -> Path:
         session = self.store.load_session(session_id)
         output_dir = export_output_dir(self.root, session_id)
         output = output_dir / "evidence-report.html"
-        output.write_text(self._render(session), encoding="utf-8")
+        with atomic_output(output) as temporary:
+            temporary.write_text(self._render(session), encoding="utf-8")
         return output
 
     def _render(self, session: dict) -> str:
@@ -192,6 +196,7 @@ class PdfExporter:
         self.root = Path(root)
         self.store = SessionStore(self.root)
 
+    @synchronized
     def export(self, session_id: str) -> Path:
         try:
             from fpdf import FPDF
@@ -214,7 +219,8 @@ class PdfExporter:
             for event in selected_events(session):
                 self._add_event_page(pdf, session, event, title)
         self._add_footers(pdf)
-        pdf.output(str(output))
+        with atomic_output(output) as temporary:
+            pdf.output(str(temporary))
         return output
 
     def _add_summary_page(self, pdf, session: dict, title: str) -> None:
@@ -239,7 +245,8 @@ class PdfExporter:
         page_width = pdf.w - pdf.l_margin - pdf.r_margin
         for key, value in metadata.items():
             if value:
-                pdf.multi_cell(page_width, 7, f"{key.replace('_', ' ').title()}: {self._clean(str(value))}")
+                pdf.set_x(pdf.l_margin)
+                pdf.multi_cell(page_width, 7, f"{key.replace('_', ' ').title()}: {self._clean(str(value))}", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(6)
         pdf.set_font("Helvetica", "B", 13)
         pdf.cell(0, 8, "Staff Confirmation")
@@ -257,7 +264,7 @@ class PdfExporter:
         pdf.set_font("Helvetica", "B", 14)
         heading = event.get("title") or event.get("type", "Screenshot").title()
         page_width = pdf.w - pdf.l_margin - pdf.r_margin
-        pdf.multi_cell(page_width, 8, self._clean(f"{event.get('index', '')}. {heading}"))
+        pdf.multi_cell(page_width, 8, self._clean(f"{event.get('index', '')}. {heading}"), new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 10)
         pdf.cell(0, 6, self._clean(event.get("timestamp", "")))
         pdf.ln(6)
@@ -273,11 +280,11 @@ class PdfExporter:
                 pdf.cell(0, 6, label)
                 pdf.ln(6)
                 pdf.set_font("Helvetica", "", 11)
-                pdf.multi_cell(page_width, 6, self._clean(str(value)))
+                pdf.multi_cell(page_width, 6, self._clean(str(value)), new_x="LMARGIN", new_y="NEXT")
         tags = event.get("tags") or []
         if tags:
             pdf.set_font("Helvetica", "", 10)
-            pdf.multi_cell(page_width, 6, self._clean("Tags: " + ", ".join(str(tag) for tag in tags)))
+            pdf.multi_cell(page_width, 6, self._clean("Tags: " + ", ".join(str(tag) for tag in tags)), new_x="LMARGIN", new_y="NEXT")
         if event.get("highlight"):
             pdf.set_font("Helvetica", "B", 10)
             pdf.cell(0, 6, "Marked as highlight")
@@ -382,6 +389,7 @@ class SessionExporter:
     def __init__(self, root: Path):
         self.root = Path(root)
 
+    @synchronized
     def export(self, session_id: str) -> dict[str, Path]:
         return {
             "html": HtmlExporter(self.root).export(session_id),
@@ -394,17 +402,21 @@ class ImageZipExporter:
         self.root = Path(root)
         self.store = SessionStore(self.root)
 
+    @synchronized
     def export(self, session_id: str, variant: str = "annotated") -> Path:
+        if variant not in {"annotated", "original", "both"}:
+            raise ValueError("Unknown image export variant")
         session = self.store.load_session(session_id)
         output_dir = export_output_dir(self.root, session_id)
         output = output_dir / f"selected-images-{variant}.zip"
         events = selected_events(session)
-        with ZipFile(output, "w", ZIP_DEFLATED) as archive:
-            archive.writestr("metadata.json", json.dumps({"session": session, "events": events}, indent=2))
+        if not events:
+            raise ValueError("Select at least one screenshot before exporting")
+        with atomic_output(output) as temporary, ZipFile(temporary, "w", ZIP_DEFLATED) as archive:
+            archive.writestr("metadata.json", json.dumps({"session": {**session, "events": events}, "events": events}, indent=2))
             for event in events:
                 for suffix, source in self._sources(session_id, event, variant):
-                    if source.exists():
-                        archive.write(source, self._archive_name(session_id, event, suffix))
+                    archive.write(source, self._archive_name(session_id, event, suffix))
         return output
 
     def _sources(self, session_id: str, event: dict, variant: str) -> list[tuple[str, Path]]:
@@ -436,32 +448,36 @@ class EvidencePackExporter:
         self.root = Path(root)
         self.store = SessionStore(self.root)
 
-    def export(self, session_id: str) -> Path:
+    @synchronized
+    def export(self, session_id: str, include_originals: bool = False) -> Path:
         session = self.store.load_session(session_id)
         output_dir = export_output_dir(self.root, session_id)
         output = output_dir / "evidence-pack.zip"
-        report_paths = SessionExporter(self.root).export(session_id)
         events = selected_events(session)
+        if not events:
+            raise ValueError("Select at least one screenshot before exporting")
+        report_paths = SessionExporter(self.root).export(session_id)
         image_exporter = ImageZipExporter(self.root)
         files: list[dict] = []
 
-        with ZipFile(output, "w", ZIP_DEFLATED) as archive:
+        with atomic_output(output) as temporary, ZipFile(temporary, "w", ZIP_DEFLATED) as archive:
             self._write_file(archive, files, report_paths["html"], "reports/evidence-report.html")
             self._write_file(archive, files, report_paths["pdf"], "reports/evidence-report.pdf")
             for event in events:
-                for suffix, source in image_exporter._sources(session_id, event, "both"):
-                    if source.exists():
-                        self._write_file(
-                            archive,
-                            files,
-                            source,
-                            f"images/{image_exporter._archive_name(session_id, event, suffix)}",
-                            event_index=event.get("index"),
-                            variant=suffix,
-                        )
-            manifest = {"session": {**session, "events": events}, "events": events, "files": files}
+                for suffix, source in image_exporter._sources(session_id, event, "both" if include_originals else "annotated"):
+                    self._write_file(
+                        archive,
+                        files,
+                        source,
+                        f"images/{image_exporter._archive_name(session_id, event, suffix)}",
+                        event_index=event.get("index"),
+                        variant=suffix,
+                    )
+            csv_data = self._csv(events, files).encode("utf-8")
+            archive.writestr("manifest.csv", csv_data)
+            files.append({"path": "manifest.csv", "size_bytes": len(csv_data), "sha256": hashlib.sha256(csv_data).hexdigest()})
+            manifest = {"session": {**session, "events": events}, "events": events, "files": files, "includes_originals": include_originals}
             archive.writestr("manifest.json", json.dumps(manifest, indent=2))
-            archive.writestr("manifest.csv", self._csv(events, files))
         return output
 
     @staticmethod
@@ -473,12 +489,13 @@ class EvidencePackExporter:
         event_index: int | None = None,
         variant: str | None = None,
     ) -> None:
-        archive.write(source, archive_path)
+        data = source.read_bytes()
+        archive.writestr(archive_path, data)
         manifest_files.append(
             {
                 "path": archive_path,
-                "size_bytes": source.stat().st_size,
-                "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "size_bytes": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
                 "event_index": event_index,
                 "variant": variant,
             }
@@ -516,6 +533,7 @@ class EvidencePackVerifier:
         self.root = Path(root)
         self.store = SessionStore(self.root)
 
+    @synchronized
     def verify(self, session_id: str) -> dict:
         self.store.load_session(session_id)
         pack_path = export_output_dir(self.root, session_id) / "evidence-pack.zip"
@@ -524,7 +542,8 @@ class EvidencePackVerifier:
         try:
             with ZipFile(pack_path) as archive:
                 manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
-                files = manifest.get("files", [])
+                self._validate_manifest(manifest, session_id, archive.namelist())
+                files = manifest["files"]
                 checked = len(files)
                 archive_names = archive.namelist()
                 for item in files:
@@ -533,7 +552,7 @@ class EvidencePackVerifier:
                         failures.append(failure)
         except FileNotFoundError:
             failures.append({"path": str(pack_path), "reason": "pack_missing"})
-        except (BadZipFile, KeyError, json.JSONDecodeError) as exc:
+        except (BadZipFile, KeyError, ValueError, TypeError) as exc:
             failures.append({"path": str(pack_path), "reason": type(exc).__name__})
 
         return {
@@ -542,6 +561,43 @@ class EvidencePackVerifier:
             "failure_count": len(failures),
             "failures": failures,
         }
+
+    @staticmethod
+    def _validate_manifest(manifest: dict, session_id: str, archive_names: list[str]) -> None:
+        if not isinstance(manifest, dict):
+            raise ValueError("Invalid manifest")
+        session, events, files = manifest.get("session"), manifest.get("events"), manifest.get("files")
+        if not isinstance(session, dict) or session.get("id") != session_id:
+            raise ValueError("Manifest session does not match")
+        if not isinstance(events, list) or not events or session.get("events") != events:
+            raise ValueError("Manifest must contain the selected events")
+        if not isinstance(files, list) or not files:
+            raise ValueError("Manifest has no files")
+        paths = []
+        for item in files:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                raise ValueError("Invalid file entry")
+            if not isinstance(item.get("size_bytes"), int) or item["size_bytes"] < 0:
+                raise ValueError("Invalid file size")
+            if not isinstance(item.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"]):
+                raise ValueError("Invalid checksum")
+            paths.append(item["path"])
+        required = {"reports/evidence-report.html", "reports/evidence-report.pdf"}
+        indexes = set()
+        for event in events:
+            if not isinstance(event, dict) or not isinstance(event.get("index"), int) or event["index"] in indexes:
+                raise ValueError("Invalid or duplicate event index")
+            indexes.add(event["index"])
+            required.add(f"images/{ImageZipExporter._archive_name(session_id, event, 'annotated')}")
+            if manifest.get("includes_originals"):
+                required.add(f"images/{ImageZipExporter._archive_name(session_id, event, 'original')}")
+        if len(paths) != len(set(paths)) or not required.issubset(paths):
+            raise ValueError("Manifest is incomplete or has duplicate paths")
+        if archive_names.count("manifest.json") != 1 or archive_names.count("manifest.csv") != 1:
+            raise ValueError("Missing or duplicate manifest")
+        # Older packs did not checksum CSV; continue verifying those packs.
+        if set(archive_names) != set(paths) | {"manifest.json", "manifest.csv"}:
+            raise ValueError("Archive contents do not match the manifest")
 
     @staticmethod
     def _verify_file(archive: ZipFile, item: dict, archive_names: list[str]) -> dict | None:

@@ -272,7 +272,7 @@ class HtmlExporterTests(unittest.TestCase):
             self.assertIn("manifest.json", names)
             self.assertIn("manifest.csv", names)
             self.assertTrue(any(name.endswith("001_annotated.png") for name in names))
-            self.assertTrue(any(name.endswith("001_original.png") for name in names))
+            self.assertFalse(any(name.endswith("001_original.png") for name in names))
             self.assertFalse(any(name.endswith("002_annotated.png") for name in names))
             self.assertEqual(manifest["events"][0]["title"], "Event 1")
             self.assertNotIn("Event 2", json.dumps(manifest))

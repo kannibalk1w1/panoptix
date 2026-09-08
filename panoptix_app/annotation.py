@@ -5,7 +5,8 @@ from typing import Any
 
 from PIL import Image, ImageDraw
 
-from .storage import SessionStore
+from .storage import SessionStore, session_transaction
+from .persistence import atomic_output
 
 
 DEFAULT_MARKER: dict[str, Any] = {
@@ -25,7 +26,7 @@ def normalize_marker(marker: dict[str, Any] | None = None) -> dict[str, Any]:
     return merged
 
 
-def annotate_click(source: Path, output: Path, x: int, y: int, marker: dict[str, Any] | None = None) -> Path:
+def annotate_click(source: Path, output: Path, x: int, y: int, marker: dict[str, Any] | None = None, redactions: list | None = None) -> Path:
     marker = normalize_marker(marker)
     output.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(source) as image:
@@ -47,10 +48,16 @@ def annotate_click(source: Path, output: Path, x: int, y: int, marker: dict[str,
         draw.polygon([(x, y), (x - 12, y - 2), (x - 2, y - 12)], fill=color)
     else:
         draw.ellipse((x - half, y - half, x + half, y + half), outline=color, width=stroke)
-    working.save(output)
+    # Redactions always cover the marker, never the other way round.
+    for redaction in redactions or []:
+        left, top = int(redaction["x"]), int(redaction["y"])
+        draw.rectangle((left, top, left + int(redaction["width"]), top + int(redaction["height"])), fill=(0, 0, 0))
+    with atomic_output(output) as temporary:
+        working.save(temporary)
     return output
 
 
+@session_transaction
 def update_event_marker(
     root: Path | SessionStore,
     session_id: str,
@@ -69,8 +76,8 @@ def update_event_marker(
     source = _source_for_event(screenshot_dir, event)
     output = screenshot_dir / event["screenshot"]
     normalized = normalize_marker(marker)
-    annotate_click(source, output, int(event["x"]), int(event["y"]), normalized)
-    session = store.update_event(session_id, event_index, {"marker": normalized, "redactions": []})
+    annotate_click(source, output, int(event["x"]), int(event["y"]), normalized, event.get("redactions"))
+    session = store.update_event(session_id, event_index, {"marker": normalized})
     return {"session": session, "event": next(item for item in session["events"] if item.get("index") == event_index)}
 
 
