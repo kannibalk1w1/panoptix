@@ -25,6 +25,24 @@ class InstallerContentsTests(unittest.TestCase):
         self.assertEqual(markdown, [])
 
 
+class InstallerSetupTests(unittest.TestCase):
+    def setUp(self):
+        self.iss = (PROJECT_ROOT / "installer" / "panoptix.iss").read_text(encoding="utf-8")
+
+    def test_installs_as_64_bit(self):
+        # Panoptix.exe is PE32+; a 32-bit install would leave a dead shortcut.
+        self.assertIn("ArchitecturesAllowed=x64compatible", self.iss)
+        self.assertIn("ArchitecturesInstallIn64BitMode=x64compatible", self.iss)
+
+    def test_reinstall_closes_the_running_tray_app(self):
+        self.assertIn("CloseApplications=yes", self.iss)
+
+    def test_shortcuts_point_at_the_installed_executable(self):
+        shortcuts = re.findall(r'^Name:\s*"([^"]+)";\s*Filename:\s*"([^"]+)"', self.iss, re.MULTILINE)
+        desktop = [target for name, target in shortcuts if "autodesktop" in name]
+        self.assertEqual(desktop, ["{app}\\{#AppExeName}"])
+
+
 class SpecTests(unittest.TestCase):
     def setUp(self):
         self.spec = (PROJECT_ROOT / "panoptix.spec").read_text(encoding="utf-8")

@@ -8,6 +8,16 @@
 - [ ] Confirm Panoptix appears in the Start menu.
 - [ ] Confirm the desktop shortcut appears if the task was ticked.
 
+## 0b. Desktop Shortcut
+
+- [ ] Confirm the desktop shortcut exists after install.
+- [ ] Right-click it, choose Properties, and note the Target path.
+- [ ] Confirm a file actually exists at that path.
+- [ ] Double-click the shortcut and confirm Panoptix starts.
+- [ ] If Windows asks you to locate the file, open Windows Security, go to
+      Protection history, and check whether Panoptix.exe was quarantined.
+- [ ] Record which install option you chose, `Just me` or `All users`.
+
 ## 1. Launch
 
 - [ ] Open Panoptix from the Start menu (or `dist\Panoptix.exe` for an unpackaged build).

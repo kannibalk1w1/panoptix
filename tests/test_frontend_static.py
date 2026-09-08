@@ -134,6 +134,19 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("updateLiveStatusDisplay", app_js)
         self.assertIn("data-live-event-count", app_js)
         self.assertIn("data-system-skipped", app_js)
+        # The elapsed time has to be live too, not baked into the banner markup.
+        self.assertIn("data-live-elapsed", app_js)
+
+    def test_status_catches_up_when_the_page_is_looked_at_again(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        # Browsers throttle timers in background tabs, so the 5s poll alone
+        # leaves the screenshot count stale while staff work in another window.
+        self.assertIn("visibilitychange", app_js)
+        self.assertIn('window.addEventListener("focus", pollStatus)', app_js)
+        self.assertIn("setInterval(pollStatus, 5000)", app_js)
+        # A failed poll must not stop the timer.
+        self.assertIn("Status poll failed", app_js)
 
     def test_settings_and_review_show_feedback_for_save_and_search(self):
         app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
