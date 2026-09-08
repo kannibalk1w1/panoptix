@@ -29,7 +29,7 @@ http://127.0.0.1:8765
 - Configurable screenshot storage folder with a native Windows folder browser, so sessions and screenshots can live on a shared network folder.
 - Persistent settings for observation interval, retention days, storage warning, and default evidence purpose.
 - Local storage usage display and warning threshold.
-- Retention preview and recoverable removal of sessions older than the configured retention period.
+- Retention preview and recoverable removal of sessions older than the configured retention period, with permanent deletion once a removed session is itself past that period.
 - Vanilla dashboard served locally.
 
 Evidence Capture starts a global mouse hook when `pynput` is installed. If dependencies are missing, the dashboard stays usable and reports manual fallback mode.
@@ -129,13 +129,18 @@ installation. The Windows build workflow runs both test suites before packaging.
   choose **Apply redaction**. Zoomed images can be scrolled. Coordinate-based
   redaction remains available in Review.
 - **Preview retention cleanup** in Settings lists the sessions that would be
-  removed. Confirming moves only those still-eligible sessions to **Deleted
-  sessions**, which is also accessible from the Sessions page.
+  removed and the deleted sessions that would be permanently purged. Confirming
+  moves only those still-eligible sessions to **Deleted sessions**, which is also
+  accessible from the Sessions page.
 - Session removal keeps saved notes, screenshots and local exports under the
   current data folder's `trash` directory. **Restore** returns them to Sessions
-  without overwriting an existing session. Deleted sessions still occupy disk
-  space and are not automatically purged. Exports in separately configured
+  without overwriting an existing session. Exports in separately configured
   folders are not moved. Unsaved browser drafts are not part of a deleted backup.
+- Deleted sessions keep using disk until they are purged. Settings reports how
+  much they hold, **Delete permanently** removes one, **Permanently delete all**
+  empties the list, and retention cleanup purges any deleted more than the
+  retention period ago. Purging cannot be undone. A session whose `session.json`
+  is missing cannot be restored but can still be purged.
 
 ## Recording And Storage
 

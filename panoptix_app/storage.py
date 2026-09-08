@@ -149,13 +149,18 @@ class SessionStore:
 
     @synchronized
     def delete_session(self, session_id: str) -> None:
-        self._validate_session_id(session_id)
-        session = self.load_session(session_id)
         source = self._session_dir(session_id)
         exports = self._contained(self.exports_dir, session_id)
+        if not source.exists() and not exports.exists():
+            raise FileNotFoundError(session_id)
+        try:
+            title = self.load_session(session_id).get("metadata", {}).get("activity") or session_id
+        except (OSError, ValueError):
+            # A corrupt or half-written session must still be removable.
+            title = session_id
         trash = self._trash_dir(uuid.uuid4().hex)
         trash.mkdir(parents=True)
-        write_json(trash / "entry.json", {"session_id": session_id, "title": session.get("metadata", {}).get("activity") or session_id, "deleted_at": now_iso()})
+        write_json(trash / "entry.json", {"session_id": session_id, "title": title, "deleted_at": now_iso()})
         try:
             self._move_parts([(source, trash / "session"), (exports, trash / "exports")])
         except Exception:
@@ -188,10 +193,42 @@ class SessionStore:
         entries = []
         parent = self._contained(self.root, "trash")
         for path in parent.glob("*/entry.json"):
-            directory = self._trash_dir(path.parent.name)
-            if (directory / "session" / "session.json").exists():
-                entries.append({**self._read_json(path), "trash_id": directory.name})
+            try:
+                directory = self._trash_dir(path.parent.name)
+                entry = self._read_json(path)
+            except (OSError, ValueError):
+                # Folders Panoptix did not write, such as a sync tool's conflicted
+                # copy, are left alone rather than failing every listing.
+                continue
+            if not isinstance(entry, dict) or not isinstance(entry.get("session_id"), str):
+                continue
+            entries.append(
+                {
+                    **entry,
+                    "trash_id": directory.name,
+                    "title": entry.get("title") or entry["session_id"],
+                    "deleted_at": entry.get("deleted_at") or "",
+                    "restorable": (directory / "session" / "session.json").is_file(),
+                }
+            )
         return sorted(entries, key=lambda entry: entry["deleted_at"], reverse=True)
+
+    @synchronized
+    def purge_trash(self, trash_id: str) -> dict[str, Any]:
+        """Permanently remove one deleted session. This cannot be undone."""
+        trash = self._trash_dir(trash_id)
+        if not trash.is_dir():
+            raise FileNotFoundError("Deleted session not found")
+        try:
+            session_id = self._read_json(trash / "entry.json").get("session_id")
+        except (OSError, ValueError):
+            session_id = None
+        shutil.rmtree(trash)
+        return {"trash_id": trash_id, "session_id": session_id}
+
+    @synchronized
+    def empty_trash(self) -> list[str]:
+        return [self.purge_trash(entry["trash_id"])["session_id"] for entry in self.list_trash()]
 
     @synchronized
     def restore_session(self, trash_id: str) -> dict[str, Any]:
@@ -209,7 +246,12 @@ class SessionStore:
         self._move_parts([(source, target), (source_exports, exports)])
         (trash / "entry.json").unlink()
         trash.rmdir()
-        return self.load_session(session_id)
+        try:
+            return self.load_session(session_id)
+        except (OSError, ValueError):
+            # The files are back in place even though this session's JSON cannot
+            # be read; report that rather than failing a restore that already happened.
+            return {"id": session_id, "unreadable": True}
 
     def screenshot_dir(self, session_id: str) -> Path:
         self._validate_session_id(session_id)

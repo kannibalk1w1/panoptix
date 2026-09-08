@@ -868,16 +868,30 @@ async function renderTrash() {
   setActive("trash");
   title.textContent = "Deleted sessions";
   const data = await api.get("/api/trash");
+  const storage = (await api.get("/api/storage")).storage;
   app.innerHTML = `<section class="card">
     <h2>Restore deleted sessions</h2>
-    <p class="muted">Sessions, screenshots and local exports are kept here until restored. They still use disk space; there is no automatic permanent deletion. Reports exported to other folders are unaffected.</p>
-    <button class="secondary" id="back-sessions">Back to sessions</button>
+    <p class="muted">Sessions, screenshots and local exports are kept here until you restore or permanently delete them, and retention cleanup removes them for good once they are older than the retention period. Reports exported to other folders are unaffected.</p>
+    <p class="muted">Deleted sessions currently use <strong>${escapeHtml(storage.trash_mb)} MB</strong>.</p>
+    <div class="actions">
+      <button class="secondary" id="back-sessions">Back to sessions</button>
+      <button class="danger" id="empty-trash" ${data.sessions.length ? "" : "disabled"}>Permanently delete all</button>
+    </div>
     ${data.sessions.map((entry) => `<div class="session-row">
-      <div><strong>${escapeHtml(entry.title)}</strong><p class="muted">Deleted ${escapeHtml(entry.deleted_at)}</p></div>
-      <button class="primary" data-restore-session="${escapeAttr(entry.trash_id)}">Restore</button>
+      <div><strong>${escapeHtml(entry.title)}</strong><p class="muted">Deleted ${escapeHtml(entry.deleted_at)}${entry.restorable ? "" : " · incomplete, cannot be restored"}</p></div>
+      <div class="actions">
+        <button class="primary" data-restore-session="${escapeAttr(entry.trash_id)}" ${entry.restorable ? "" : "disabled"}>Restore</button>
+        <button class="danger" data-purge-session="${escapeAttr(entry.trash_id)}">Delete permanently</button>
+      </div>
     </div>`).join("") || "<p>No deleted sessions.</p>"}
   </section>`;
   app.querySelector("#back-sessions").onclick = renderSessions;
+  app.querySelector("#empty-trash").onclick = async (event) => {
+    if (!confirm(`Permanently delete all ${data.sessions.length} deleted session(s) and free ${storage.trash_mb} MB? This cannot be undone.`)) return;
+    event.currentTarget.disabled = true;
+    await api.delete("/api/trash");
+    await renderTrash();
+  };
   app.querySelectorAll("[data-restore-session]").forEach((button) => {
     button.onclick = async () => {
       button.disabled = true;
@@ -887,15 +901,28 @@ async function renderTrash() {
       } finally { button.disabled = false; }
     };
   });
+  app.querySelectorAll("[data-purge-session]").forEach((button) => {
+    button.onclick = async () => {
+      if (!confirm("Permanently delete this session, its screenshots and its local exports? This cannot be undone.")) return;
+      button.disabled = true;
+      try {
+        await api.delete(`/api/trash/${button.dataset.purgeSession}`);
+        await renderTrash();
+      } finally { button.disabled = false; }
+    };
+  });
 }
 
 async function previewRetention() {
   const preview = await api.get("/api/retention/preview");
+  const expired = preview.expired_trash || [];
   const dialog = showDialog(`<h2 id="dialog-title">Retention cleanup preview</h2>
     <p>${preview.sessions.length} session${preview.sessions.length === 1 ? "" : "s"} started before ${escapeHtml(preview.cutoff)} (${preview.retention_days} days).</p>
-    <p>These will move to Deleted sessions and can be restored. Disk space is retained. The active recording is protected.</p>
-    <div class="cleanup-list">${preview.sessions.map((session) => `<p><strong>${escapeHtml(session.title)}</strong><br>${escapeHtml(session.started)} · ${session.event_count} screenshots</p>`).join("") || "<p>No sessions are eligible.</p>"}</div>
-    <div class="actions"><button class="danger" id="confirm-cleanup" ${preview.sessions.length ? "" : "disabled"}>Move ${preview.sessions.length} sessions to deleted</button><button class="secondary" data-close-dialog>Cancel</button></div>`);
+    <p>These will move to Deleted sessions and can be restored. The active recording is protected.</p>
+    <div class="cleanup-list" id="cleanup-sessions">${preview.sessions.map((session) => `<p><strong>${escapeHtml(session.title)}</strong><br>${escapeHtml(session.started)} · ${session.event_count} screenshots</p>`).join("") || "<p>No sessions are eligible.</p>"}</div>
+    <p>${expired.length} previously deleted session${expired.length === 1 ? "" : "s"} passed the retention period and will be <strong>permanently removed</strong>, freeing their disk space. This cannot be undone.</p>
+    <div class="cleanup-list" id="cleanup-trash">${expired.map((entry) => `<p><strong>${escapeHtml(entry.title)}</strong><br>Deleted ${escapeHtml(entry.deleted_at)}</p>`).join("") || "<p>No deleted sessions have expired.</p>"}</div>
+    <div class="actions"><button class="danger" id="confirm-cleanup" ${preview.sessions.length || expired.length ? "" : "disabled"}>Move ${preview.sessions.length} to deleted, purge ${expired.length}</button><button class="secondary" data-close-dialog>Cancel</button></div>`);
   let cleaning = false;
   dialog.addEventListener("cancel", (event) => { if (cleaning) event.preventDefault(); });
   dialog.querySelector("#confirm-cleanup").onclick = async (event) => {
@@ -904,7 +931,10 @@ async function previewRetention() {
     button.disabled = true;
     dialog.querySelector("[data-close-dialog]").disabled = true;
     try {
-      await api.post("/api/retention/cleanup", { session_ids: preview.sessions.map((session) => session.id) });
+      await api.post("/api/retention/cleanup", {
+        session_ids: preview.sessions.map((session) => session.id),
+        trash_ids: expired.map((entry) => entry.trash_id),
+      });
       dialog.close();
       await renderTrash();
     } finally {
@@ -1022,6 +1052,7 @@ async function renderSettings() {
     <section class="card ${warningClass}">
       <h2>Local Storage</h2>
       <p><strong>${escapeHtml(storage.total_mb)} MB</strong> across ${escapeHtml(storage.session_count)} session${storage.session_count === 1 ? "" : "s"}.</p>
+      ${storage.trash_count ? `<p class="muted">Includes ${escapeHtml(storage.trash_mb)} MB held by ${escapeHtml(storage.trash_count)} deleted session${storage.trash_count === 1 ? "" : "s"} awaiting permanent deletion.</p>` : ""}
       <p class="muted">${escapeHtml(warningText)}</p>
       <p class="muted">${escapeHtml(storage.root)}</p>
       <div class="actions">

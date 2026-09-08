@@ -71,6 +71,14 @@ class DataContext:
         return True
 
 
+def _id_list(value: Any, label: str) -> list[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"Expected a list of {label}")
+    return value
+
+
 def create_handler(
     root: Path,
     store: SessionStore,
@@ -235,10 +243,15 @@ def create_handler(
                 elif path == "/api/retention/cleanup":
                     settings = context.settings_store.load()
                     with recorder._lock:
-                        ids = payload.get("session_ids")
-                        if ids is not None and (not isinstance(ids, list) or not all(isinstance(item, str) for item in ids)):
-                            raise ValueError("Expected a list of session ids")
-                        self._json(cleanup_old_sessions(context.store, settings["retention_days"], protected_session_id=recorder.active_session_id, session_ids=ids))
+                        self._json(
+                            cleanup_old_sessions(
+                                context.store,
+                                settings["retention_days"],
+                                protected_session_id=recorder.active_session_id,
+                                session_ids=_id_list(payload.get("session_ids"), "session ids"),
+                                trash_ids=_id_list(payload.get("trash_ids"), "deleted-session ids"),
+                            )
+                        )
                 else:
                     self.send_error(404)
             except Exception as exc:
@@ -297,6 +310,10 @@ def create_handler(
                     session_id = unquote(path.removeprefix("/api/sessions/"))
                     recorder.delete_session(session_id)
                     self._json({"ok": True})
+                elif path == "/api/trash":
+                    self._json({"purged": context.store.empty_trash()})
+                elif path.startswith("/api/trash/"):
+                    self._json(context.store.purge_trash(unquote(path.removeprefix("/api/trash/"))))
                 else:
                     self.send_error(404)
             except Exception as exc:

@@ -16,15 +16,26 @@ def preview_cleanup(store: SessionStore, retention_days: int, now: datetime | No
             sessions.append(summary)
         else:
             kept.append(summary["id"])
+    # Deleted sessions are kept for the same retention period, then purged for
+    # good. Without this the retention policy would never free any disk space.
+    expired_trash = [entry for entry in store.list_trash() if _parse_started(entry["deleted_at"]) < cutoff]
     return {
         "retention_days": retention_days,
         "cutoff": cutoff.replace(microsecond=0).isoformat(),
         "sessions": sessions,
         "kept": kept,
+        "expired_trash": expired_trash,
     }
 
 
-def cleanup_old_sessions(store: SessionStore, retention_days: int, now: datetime | None = None, protected_session_id: str | None = None, session_ids: list[str] | None = None) -> dict:
+def cleanup_old_sessions(
+    store: SessionStore,
+    retention_days: int,
+    now: datetime | None = None,
+    protected_session_id: str | None = None,
+    session_ids: list[str] | None = None,
+    trash_ids: list[str] | None = None,
+) -> dict:
     with store.transaction():
         preview = preview_cleanup(store, retention_days, now, protected_session_id)
         deleted = []
@@ -34,7 +45,12 @@ def cleanup_old_sessions(store: SessionStore, retention_days: int, now: datetime
                 deleted.append(session["id"])
             else:
                 preview["kept"].append(session["id"])
-        return {**preview, "deleted": deleted}
+        purged = []
+        for entry in preview["expired_trash"]:
+            if trash_ids is None or entry["trash_id"] in trash_ids:
+                store.purge_trash(entry["trash_id"])
+                purged.append(entry["session_id"])
+        return {**preview, "deleted": deleted, "purged": purged}
 
 
 def _parse_started(value: str) -> datetime:

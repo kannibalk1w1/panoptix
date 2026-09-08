@@ -229,7 +229,7 @@ class BrowserReviewTests(unittest.TestCase):
         write_json(self.store.sessions_dir / self.sid / "session.json", session)
         self.page.locator('[data-view="settings"]').click()
         self.page.locator("#cleanup-retention").click()
-        expect(self.page.locator(".cleanup-list")).to_contain_text("Browser review")
+        expect(self.page.locator("#cleanup-sessions")).to_contain_text("Browser review")
         self.page.locator("[data-close-dialog]").click()
         self.assertTrue(self.store.load_session(self.sid))
         self.page.locator("#cleanup-retention").click()
@@ -239,6 +239,17 @@ class BrowserReviewTests(unittest.TestCase):
         self.page.locator("[data-restore-session]").click()
         expect(self.page.locator("[data-restore-session]")).to_have_count(0)
         self.assertEqual(len(self.store.load_session(self.sid)["events"]), 2)
+
+    def test_deleted_session_can_be_permanently_removed(self):
+        self.page.locator('[data-view="sessions"]').click()
+        self.page.locator(f'[data-delete-session="{self.sid}"]').click()
+        self.page.locator("#show-trash").click()
+        expect(self.page.locator("[data-purge-session]")).to_have_count(1)
+        self.page.locator("[data-purge-session]").click()
+        expect(self.page.locator("[data-purge-session]")).to_have_count(0)
+        self.assertTrue(any("cannot be undone" in message for message in self.dialogs))
+        self.assertEqual(self.store.list_trash(), [])
+        self.assertFalse(any((self.root / "trash").iterdir()))
 
     def test_fit_view_redaction_maps_large_screenshot_to_native_pixels(self):
         directory = self.store.screenshot_dir(self.sid)

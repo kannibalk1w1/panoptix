@@ -246,6 +246,11 @@ Skip this section on a single-screen PC.
 - [ ] Click cleanup.
 - [ ] Preview the list and confirm old sessions move to Deleted sessions.
 - [ ] Confirm recent sessions remain.
+- [ ] Confirm Settings reports the MB held by deleted sessions.
+- [ ] In Deleted sessions, use **Delete permanently** on one entry and confirm the
+      Local Storage total drops by roughly that session's size.
+- [ ] Confirm the retention preview lists deleted sessions past the retention
+      period under permanent removal, and that confirming frees their space.
 
 ## 16. Delete Safety
 
@@ -256,6 +261,8 @@ Skip this section on a single-screen PC.
 - [ ] Confirm it disappears from Sessions.
 - [ ] Confirm unrelated sessions remain.
 - [ ] Open Deleted sessions and restore the removed session, including its images and notes.
+- [ ] Create a folder by hand inside the data folder's `trash` directory and confirm
+      Deleted sessions still lists real entries and new recordings still start.
 
 ## 17. Restart Persistence
 

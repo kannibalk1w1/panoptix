@@ -56,6 +56,35 @@ class RetentionTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
+    def test_deleted_sessions_can_be_purged_over_the_api(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SessionStore(root)
+            first = store.create_session("evidence", {"activity": "First"}, {})
+            second = store.create_session("evidence", {"activity": "Second"}, {})
+            store.delete_session(first["id"])
+            store.delete_session(second["id"])
+            handler = create_handler(root, store, Recorder(store, PlaceholderCapture()))
+            server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base_url = f"http://127.0.0.1:{server.server_address[1]}"
+            try:
+                trash_id = next(entry["trash_id"] for entry in store.list_trash() if entry["session_id"] == first["id"])
+                request = Request(f"{base_url}/api/trash/{trash_id}", method="DELETE")
+                with urlopen(request, timeout=5) as response:
+                    self.assertEqual(json.loads(response.read().decode("utf-8"))["session_id"], first["id"])
+                self.assertEqual([entry["session_id"] for entry in store.list_trash()], [second["id"]])
+
+                with urlopen(Request(f"{base_url}/api/trash", method="DELETE"), timeout=5) as response:
+                    self.assertEqual(json.loads(response.read().decode("utf-8"))["purged"], [second["id"]])
+                self.assertEqual(store.list_trash(), [])
+                self.assertFalse(any((root / "trash").iterdir()))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
     @staticmethod
     def set_started(store: SessionStore, session_id: str, started: datetime) -> None:
         session = store.load_session(session_id)
