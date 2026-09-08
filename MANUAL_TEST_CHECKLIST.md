@@ -1,8 +1,16 @@
 # Panoptix Manual Test Checklist
 
+## 0. Install
+
+- [ ] Run `dist\Panoptix-Setup-<version>.exe` on the test PC.
+- [ ] Accept the SmartScreen `More info` -> `Run anyway` prompt.
+- [ ] Confirm the install completes without admin rights.
+- [ ] Confirm Panoptix appears in the Start menu.
+- [ ] Confirm the desktop shortcut appears if the task was ticked.
+
 ## 1. Launch
 
-- [ ] Open `dist\Panoptix.exe`.
+- [ ] Open Panoptix from the Start menu (or `dist\Panoptix.exe` for an unpackaged build).
 - [ ] Confirm dashboard opens at `http://127.0.0.1:8765`.
 - [ ] Confirm sidebar shows Home, Evidence Capture, Observation Mode, Sessions, Settings.
 - [ ] Confirm Home shows the `Background Status` panel.
@@ -20,10 +28,30 @@
 - [ ] Toggle Windows startup on.
 - [ ] Save settings.
 - [ ] Toggle Windows startup off again if you do not want it staying enabled.
-- [ ] Set export folder to a real folder you can find easily.
+- [ ] Set export folder to a real folder you can find easily, using `Browse folder`.
 - [ ] Save settings.
 - [ ] Refresh the page.
 - [ ] Confirm settings persisted.
+
+## 2b. Screenshot Storage Folder
+
+- [ ] Go to Settings.
+- [ ] Find the `Screenshot storage folder` card.
+- [ ] Confirm `In use now` shows the current folder.
+- [ ] Click `Browse folder`.
+- [ ] Confirm the Windows folder picker opens.
+- [ ] Choose a network folder the admin PC can also reach.
+- [ ] Click `Save screenshot folder`.
+- [ ] Confirm the restart notice appears.
+- [ ] Close and reopen Panoptix.
+- [ ] Confirm `In use now` shows the network folder.
+- [ ] Capture a session.
+- [ ] Confirm screenshots appear in the network folder from the admin PC.
+- [ ] Disconnect from the network or rename the folder.
+- [ ] Restart Panoptix.
+- [ ] Confirm Home shows the `Screenshot folder warning` and the app still runs.
+- [ ] Restore the folder and restart.
+- [ ] Click `Use default folder` to go back to local storage if needed.
 
 ## 3. Export Folder Fallback
 
@@ -217,6 +245,8 @@
 - [ ] Hotkey does not fire.
 - [ ] Startup says installed but does not launch.
 - [ ] Export goes somewhere unexpected.
+- [ ] Screenshots are written somewhere other than the configured screenshot folder.
+- [ ] Folder picker does not open or returns the wrong path.
 - [ ] Redaction cannot be undone.
 - [ ] Marker changes damage the original image.
 - [ ] Tray controls and dashboard disagree.

@@ -8,6 +8,7 @@ let reviewFilter = "all";
 let reviewSearch = "";
 let isRendering = false;
 let settingsFeedback = "";
+let dataLocationFeedback = "";
 
 const api = {
   async get(path) {
@@ -305,6 +306,10 @@ function renderSystemStatus() {
   const exportWarning = exportDestination.warning
     ? `<p class="status-warning"><strong>Export folder warning</strong>: ${escapeHtml(exportDestination.warning)}</p>`
     : `<p class="muted">Export folder: ${escapeHtml(exportDestination.path || "Panoptix local exports")}</p>`;
+  const dataLocation = latestStatus.data_location || {};
+  const dataWarning = dataLocation.warning
+    ? `<p class="status-warning"><strong>Screenshot folder warning</strong>: ${escapeHtml(dataLocation.warning)}</p>`
+    : `<p class="muted">Screenshot folder: ${escapeHtml(dataLocation.active_path || dataLocation.path || "Panoptix local storage")}</p>`;
   const hotkeyStatus = hotkey.enabled
     ? `${hotkey.shortcut || "not set"}${hotkey.error ? ` - ${hotkey.error}` : ""}`
     : "Disabled";
@@ -330,6 +335,7 @@ function renderSystemStatus() {
         </div>
       </div>
       ${exportWarning}
+      ${dataWarning}
     </section>
   `;
 }
@@ -690,8 +696,10 @@ async function renderSettings() {
   title.textContent = "Settings";
   const data = await api.get("/api/settings");
   const storageData = await api.get("/api/storage");
+  const dataLocationData = await api.get("/api/data-location");
   const settings = data.settings;
   const storage = storageData.storage;
+  const dataLocation = dataLocationData.data_location || {};
   const warningClass = storage.warning ? "storage-warning active-warning" : "storage-warning";
   const warningText = storage.warning
     ? `Storage is above the ${storage.warning_mb} MB warning threshold.`
@@ -711,6 +719,7 @@ async function renderSettings() {
       </div>
     </section>
     ${renderSystemStatus()}
+    ${renderDataLocationCard(dataLocation)}
     <form class="card form" id="settings-form">
       <h2>Settings</h2>
       ${saveFeedback}
@@ -728,7 +737,10 @@ async function renderSettings() {
       <label>Hotkey <input name="manual_hotkey" value="${escapeAttr(settings.manual_hotkey)}" placeholder="<ctrl>+<alt>+p"></label>
       <label>Retention days <input name="retention_days" type="number" min="1" value="${escapeAttr(settings.retention_days)}"></label>
       <label>Storage warning MB <input name="storage_warning_mb" type="number" min="1" value="${escapeAttr(settings.storage_warning_mb)}"></label>
-      <label>Export folder <input name="export_directory" value="${escapeAttr(settings.export_directory)}" placeholder="Leave blank for Panoptix local exports"></label>
+      <div class="folder-field">
+        <label>Export folder <input name="export_directory" value="${escapeAttr(settings.export_directory)}" placeholder="Leave blank for Panoptix local exports"></label>
+        <button type="button" data-browse-folder="export_directory">Browse folder</button>
+      </div>
       <label>Default evidence purpose
         <select name="default_evidence_purpose">
           ${renderPurposeOption("UAS evidence", settings.default_evidence_purpose)}
@@ -780,6 +792,26 @@ async function renderSettings() {
     await refreshStatus();
     await renderSettings();
   });
+  app.querySelector("[data-browse-folder=\"export_directory\"]").addEventListener("click", async (event) => {
+    const input = app.querySelector("input[name=\"export_directory\"]");
+    const picked = await browseForFolder(input.value);
+    if (picked) {
+      input.value = picked;
+    }
+  });
+  app.querySelector("#browse-data-directory").addEventListener("click", async () => {
+    const input = app.querySelector("#data-directory");
+    const picked = await browseForFolder(input.value || dataLocation.active_path || "");
+    if (picked) {
+      input.value = picked;
+    }
+  });
+  app.querySelector("#save-data-directory").addEventListener("click", async () => {
+    await saveDataDirectory(app.querySelector("#data-directory").value);
+  });
+  app.querySelector("#reset-data-directory").addEventListener("click", async () => {
+    await saveDataDirectory("");
+  });
   app.querySelector("#cleanup-retention").addEventListener("click", async () => {
     if (!confirm(`Delete sessions older than ${settings.retention_days} days? This removes local screenshots and exports.`)) {
       return;
@@ -788,6 +820,62 @@ async function renderSettings() {
     alert(`Deleted ${result.deleted.length} old session${result.deleted.length === 1 ? "" : "s"}.`);
     await renderSettings();
   });
+}
+
+function renderDataLocationCard(dataLocation) {
+  const feedback = dataLocationFeedback
+    ? `<p class="save-feedback" id="data-location-feedback">${escapeHtml(dataLocationFeedback)}</p>`
+    : "";
+  dataLocationFeedback = "";
+  const warning = dataLocation.warning
+    ? `<p class="status-warning"><strong>Screenshot folder warning</strong>: ${escapeHtml(dataLocation.warning)}</p>`
+    : "";
+  const restart = dataLocation.restart_required
+    ? `<p class="status-warning">Restart Panoptix to start saving into ${escapeHtml(dataLocation.path)}.</p>`
+    : "";
+  return `
+    <section class="card">
+      <h2>Screenshot storage folder</h2>
+      <p class="muted">Sessions, screenshots and settings are saved here. Point this at a shared network folder to open evidence from an admin PC.</p>
+      <p class="muted">In use now: ${escapeHtml(dataLocation.active_path || dataLocation.path || "")}</p>
+      ${feedback}
+      ${warning}
+      ${restart}
+      <div class="folder-field">
+        <label>Screenshot folder <input id="data-directory" value="${escapeAttr(dataLocation.configured_directory || "")}" placeholder="${escapeAttr(dataLocation.default_path || "Panoptix local storage")}"></label>
+        <button type="button" id="browse-data-directory">Browse folder</button>
+      </div>
+      <div class="actions">
+        <button class="primary" type="button" id="save-data-directory">Save screenshot folder</button>
+        <button type="button" id="reset-data-directory">Use default folder</button>
+      </div>
+      <p class="muted">Existing sessions stay in the old folder. Copy them across manually if you need them in the new location.</p>
+    </section>
+  `;
+}
+
+async function browseForFolder(initial) {
+  const response = await api.post("/api/browse-folder", { initial: initial || "" });
+  const result = response.result || {};
+  if (result.error) {
+    alert(result.error);
+    return "";
+  }
+  return result.path || "";
+}
+
+async function saveDataDirectory(directory) {
+  const response = await api.patch("/api/data-location", { directory });
+  if (response.error) {
+    alert(response.error);
+    return;
+  }
+  const updated = response.data_location || {};
+  dataLocationFeedback = updated.restart_required
+    ? "Screenshot folder saved. Restart Panoptix to start using it."
+    : "Screenshot folder saved.";
+  await refreshStatus();
+  await renderSettings();
 }
 
 function escapeHtml(value) {

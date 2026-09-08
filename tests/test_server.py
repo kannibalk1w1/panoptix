@@ -1,10 +1,13 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import json
+import os
 import sys
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
+from unittest.mock import patch
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -93,6 +96,63 @@ class ServerTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
+    def test_data_location_can_be_pointed_at_another_folder(self):
+        with TemporaryDirectory() as tmp, TemporaryDirectory() as config, TemporaryDirectory() as share:
+            root = Path(tmp)
+            chosen = str(Path(share) / "network-evidence")
+            store = SessionStore(root)
+            recorder = Recorder(store, PlaceholderCapture())
+            handler = create_handler(root, store, recorder)
+            server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base_url = f"http://127.0.0.1:{server.server_address[1]}"
+            try:
+                with patch.dict(os.environ, {"PANOPTIX_CONFIG_DIR": config}, clear=False):
+                    before = self.get_json(f"{base_url}/api/data-location")["data_location"]
+                    saved = self.patch_json(f"{base_url}/api/data-location", {"directory": chosen})["data_location"]
+                    status = self.get_json(f"{base_url}/api/status")
+                    reset = self.patch_json(f"{base_url}/api/data-location", {"directory": ""})["data_location"]
+
+                self.assertEqual(before["configured_directory"], "")
+                self.assertEqual(before["active_path"], str(root))
+                self.assertEqual(saved["configured_directory"], chosen)
+                self.assertEqual(saved["path"], chosen)
+                self.assertTrue(saved["restart_required"])
+                self.assertTrue(Path(chosen).exists())
+                self.assertEqual(status["data_location"]["configured_directory"], chosen)
+                self.assertEqual(reset["configured_directory"], "")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_data_location_rejects_unusable_folder(self):
+        with TemporaryDirectory() as tmp, TemporaryDirectory() as config:
+            root = Path(tmp)
+            blocker = Path(tmp) / "blocked.txt"
+            blocker.write_text("blocked", encoding="utf-8")
+            store = SessionStore(root)
+            recorder = Recorder(store, PlaceholderCapture())
+            handler = create_handler(root, store, recorder)
+            server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base_url = f"http://127.0.0.1:{server.server_address[1]}"
+            try:
+                with patch.dict(os.environ, {"PANOPTIX_CONFIG_DIR": config}, clear=False):
+                    response = self.patch_json(
+                        f"{base_url}/api/data-location", {"directory": str(blocker / "evidence")}
+                    )
+                    current = self.get_json(f"{base_url}/api/data-location")["data_location"]
+
+                self.assertIn("That folder cannot be used", response["error"])
+                self.assertEqual(current["configured_directory"], "")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
     @staticmethod
     def get_json(url: str) -> dict:
         with urlopen(url, timeout=5) as response:
@@ -104,6 +164,17 @@ class ServerTests(unittest.TestCase):
         request = Request(url, data=data, method="POST", headers={"Content-Type": "application/json"})
         with urlopen(request, timeout=5) as response:
             return json.loads(response.read().decode("utf-8"))
+
+    @staticmethod
+    def patch_json(url: str, payload: dict) -> dict:
+        data = json.dumps(payload).encode("utf-8")
+        request = Request(url, data=data, method="PATCH", headers={"Content-Type": "application/json"})
+        try:
+            with urlopen(request, timeout=5) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as error:
+            with error:
+                return json.loads(error.read().decode("utf-8"))
 
 
 if __name__ == "__main__":
