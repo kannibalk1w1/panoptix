@@ -97,9 +97,15 @@ class ServerTests(unittest.TestCase):
                 thread.join(timeout=2)
 
     def test_data_location_can_be_pointed_at_another_folder(self):
-        with TemporaryDirectory() as tmp, TemporaryDirectory() as config, TemporaryDirectory() as share:
+        with (
+            TemporaryDirectory() as tmp,
+            TemporaryDirectory() as config,
+            TemporaryDirectory() as share,
+            TemporaryDirectory() as local,
+        ):
             root = Path(tmp)
             chosen = str(Path(share) / "network-evidence")
+            default_root = Path(local) / "Panoptix" / "data"
             store = SessionStore(root)
             recorder = Recorder(store, PlaceholderCapture())
             handler = create_handler(root, store, recorder)
@@ -108,20 +114,35 @@ class ServerTests(unittest.TestCase):
             thread.start()
             base_url = f"http://127.0.0.1:{server.server_address[1]}"
             try:
-                with patch.dict(os.environ, {"PANOPTIX_CONFIG_DIR": config}, clear=False):
+                with patch.dict(
+                    os.environ,
+                    {"PANOPTIX_CONFIG_DIR": config, "LOCALAPPDATA": local},
+                    clear=False,
+                ):
                     before = self.get_json(f"{base_url}/api/data-location")["data_location"]
                     saved = self.patch_json(f"{base_url}/api/data-location", {"directory": chosen})["data_location"]
                     status = self.get_json(f"{base_url}/api/status")
+                    session = self.post_json(
+                        f"{base_url}/api/record/start",
+                        {"mode": "observation", "metadata": {"cyp": "Test"}},
+                    )["session"]
+                    self.post_json(f"{base_url}/api/record/stop", {})
                     reset = self.patch_json(f"{base_url}/api/data-location", {"directory": ""})["data_location"]
 
                 self.assertEqual(before["configured_directory"], "")
                 self.assertEqual(before["active_path"], str(root))
                 self.assertEqual(saved["configured_directory"], chosen)
                 self.assertEqual(saved["path"], chosen)
-                self.assertTrue(saved["restart_required"])
                 self.assertTrue(Path(chosen).exists())
                 self.assertEqual(status["data_location"]["configured_directory"], chosen)
                 self.assertEqual(reset["configured_directory"], "")
+
+                # The new folder is used straight away rather than after a restart.
+                self.assertFalse(saved["restart_required"])
+                self.assertEqual(saved["active_path"], chosen)
+                self.assertTrue((Path(chosen) / "sessions" / session["id"]).exists())
+                self.assertFalse((root / "sessions" / session["id"]).exists())
+                self.assertEqual(reset["active_path"], str(default_root))
             finally:
                 server.shutdown()
                 server.server_close()

@@ -32,6 +32,13 @@ class SettingsStore:
         self.root = Path(root)
         self.path = self.root / "settings.json"
 
+    def set_root(self, root: Path) -> None:
+        """Point at a new data folder. The background scheduler and hotkey
+        service hold this instance, so mutating it keeps them in step when the
+        screenshot folder changes."""
+        self.root = Path(root)
+        self.path = self.root / "settings.json"
+
     def load(self) -> dict[str, Any]:
         if not self.path.exists():
             return dict(DEFAULT_SETTINGS)
