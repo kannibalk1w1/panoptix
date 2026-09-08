@@ -1,0 +1,35 @@
+# Windows version resource for Panoptix.exe. An executable with no version
+# metadata looks anonymous to SmartScreen and antivirus heuristics, which is one
+# of the things that gets an unsigned build flagged as unwanted.
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(0, 1, 0, 0),
+    prodvers=(0, 1, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0),
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          "040904B0",
+          [
+            StringStruct("CompanyName", "Panoptix"),
+            StringStruct("FileDescription", "Panoptix screenshot evidence capture"),
+            StringStruct("FileVersion", "0.1.0.0"),
+            StringStruct("InternalName", "Panoptix"),
+            StringStruct("LegalCopyright", "Panoptix"),
+            StringStruct("OriginalFilename", "Panoptix.exe"),
+            StringStruct("ProductName", "Panoptix"),
+            StringStruct("ProductVersion", "0.1.0.0"),
+          ],
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct("Translation", [1033, 1200])]),
+  ],
+)
