@@ -37,9 +37,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts"
 
 [Files]
+; Only the executable is installed. The README and the manual test checklist are
+; development files, are never read at runtime, and shipping loose Markdown into
+; Program Files gave testers spurious antivirus and unwanted-file warnings.
 Source: "..\dist\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\MANUAL_TEST_CHECKLIST.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"

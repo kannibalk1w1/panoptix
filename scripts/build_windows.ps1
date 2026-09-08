@@ -16,6 +16,9 @@ if (-not $SkipDependencies) {
 }
 
 Write-Host "Building dist\Panoptix.exe"
+# panoptix.spec stamps this into the exe version resource so the executable
+# metadata matches the installer version.
+$env:PANOPTIX_VERSION = $Version
 python -m PyInstaller --clean --noconfirm panoptix.spec
 
 $exePath = Join-Path $projectRoot "dist\Panoptix.exe"
