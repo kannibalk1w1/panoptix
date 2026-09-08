@@ -2,7 +2,20 @@
 
 Local AP evidence capture tool.
 
+## Download
+
+Windows builds are attached to each release on the
+[Releases page](https://github.com/kannibalk1w1/panoptix/releases/latest):
+
+- **Panoptix-Setup-<version>.exe** — installer, adds shortcuts and optional startup.
+- **[Panoptix.exe](https://github.com/kannibalk1w1/panoptix/releases/latest/download/Panoptix.exe)** — single file, no install.
+
+64-bit Windows only. The binaries are unsigned, so SmartScreen warns on first run;
+choose **More info** then **Run anyway**. Each release lists SHA-256 checksums.
+
 ## Run
+
+From source:
 
 ```powershell
 python C:\Users\Public\panoptix\panoptix.py
