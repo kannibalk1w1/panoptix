@@ -8,8 +8,15 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from .annotation import update_event_marker
-from .app_paths import get_project_root
+from .app_config import set_configured_data_directory
+from .app_paths import (
+    directory_problem,
+    get_project_root,
+    normalize_directory,
+    resolve_data_root,
+)
 from .background import BackgroundScheduler, daily_window_is_active
+from .folder_picker import pick_folder
 from .exporter import (
     EvidencePackExporter,
     EvidencePackVerifier,
@@ -39,6 +46,12 @@ def create_handler(
     frontend_dir = get_project_root() / "frontend"
     settings_store = SettingsStore(root)
 
+    def data_location_status() -> dict[str, Any]:
+        status = resolve_data_root()
+        status["active_path"] = str(root)
+        status["restart_required"] = Path(status["path"]) != root
+        return status
+
     def app_status() -> dict[str, Any]:
         settings = settings_store.load()
         status = recorder.status()
@@ -62,6 +75,7 @@ def create_handler(
             "installed": startup.is_enabled() if startup is not None else False,
         }
         status["export_destination"] = export_destination_status(root)
+        status["data_location"] = data_location_status()
         return status
 
     class PanoptixHandler(BaseHTTPRequestHandler):
@@ -72,6 +86,8 @@ def create_handler(
                     self._json(app_status())
                 elif path == "/api/settings":
                     self._json({"settings": settings_store.load()})
+                elif path == "/api/data-location":
+                    self._json({"data_location": data_location_status()})
                 elif path == "/api/storage":
                     settings = settings_store.load()
                     self._json({"storage": get_storage_usage(root, settings["storage_warning_mb"])})
@@ -148,6 +164,8 @@ def create_handler(
                     session_id = unquote(parts[3])
                     event_index = int(parts[5])
                     self._json(restore_original_screenshot(store, session_id, event_index))
+                elif path == "/api/browse-folder":
+                    self._json({"result": pick_folder(str(payload.get("initial", "")))})
                 elif path == "/api/retention/cleanup":
                     settings = settings_store.load()
                     self._json(cleanup_old_sessions(store, settings["retention_days"]))
@@ -166,6 +184,14 @@ def create_handler(
                     self._json({"settings": updated_settings})
                     if hotkeys is not None:
                         hotkeys.restart()
+                elif path == "/api/data-location":
+                    directory = str(self._payload().get("directory", "")).strip()
+                    if directory:
+                        problem = directory_problem(normalize_directory(directory))
+                        if problem:
+                            raise ValueError(f"That folder cannot be used: {problem}")
+                    set_configured_data_directory(directory)
+                    self._json({"data_location": data_location_status()})
                 elif path.startswith("/api/sessions/") and "/events/" in path:
                     parts = path.split("/")
                     session_id = unquote(parts[3])

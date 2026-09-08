@@ -58,6 +58,31 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("Export folder", app_js)
         self.assertIn("export_directory", app_js)
 
+    def test_settings_ui_exposes_selectable_screenshot_folder(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("Screenshot storage folder", app_js)
+        self.assertIn("renderDataLocationCard", app_js)
+        self.assertIn("data-directory", app_js)
+        self.assertIn("browse-data-directory", app_js)
+        self.assertIn("save-data-directory", app_js)
+        self.assertIn("reset-data-directory", app_js)
+        self.assertIn("/api/data-location", app_js)
+        self.assertIn("/api/browse-folder", app_js)
+        self.assertIn("Restart Panoptix to start using it", app_js)
+
+    def test_settings_ui_exposes_folder_browse_for_exports(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("browseForFolder", app_js)
+        self.assertIn("data-browse-folder=\"export_directory\"", app_js)
+
+    def test_dashboard_surfaces_screenshot_folder_warning(self):
+        app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("Screenshot folder warning", app_js)
+        self.assertIn("data_location", app_js)
+
     def test_settings_ui_exposes_background_capture_controls(self):
         app_js = (Path(__file__).resolve().parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
 
