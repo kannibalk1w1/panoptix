@@ -73,6 +73,9 @@ function updateLiveStatusDisplay(status) {
   document.querySelectorAll("[data-live-event-count]").forEach((element) => {
     element.textContent = String(status.event_count || 0);
   });
+  document.querySelectorAll("[data-live-elapsed]").forEach((element) => {
+    element.textContent = formatElapsed(status.elapsed_seconds || 0);
+  });
   document.querySelectorAll("[data-live-skipped]").forEach((element) => {
     element.textContent = String(status.skipped_unchanged || 0);
   });
@@ -282,7 +285,7 @@ function renderActiveBanner() {
     <section class="active-banner">
       <div>
         <h2>${escapeHtml(mode)} ${escapeHtml(paused)}</h2>
-        <p>${escapeHtml(elapsed)} elapsed - <span data-live-event-count>${escapeHtml(latestStatus.event_count || 0)}</span> screenshots captured</p>
+        <p><span data-live-elapsed>${escapeHtml(elapsed)}</span> elapsed - <span data-live-event-count>${escapeHtml(latestStatus.event_count || 0)}</span> screenshots captured</p>
         ${skipped}
         ${fallback}
       </div>
@@ -902,8 +905,25 @@ function renderMarkerOption(value, selectedValue) {
   return `<option value="${escapeAttr(value)}" ${selected}>${escapeHtml(value)}</option>`;
 }
 
-setInterval(async () => {
-  await refreshStatus();
-}, 5000);
+async function pollStatus() {
+  try {
+    await refreshStatus();
+  } catch (error) {
+    // A dropped poll must not kill the timer; the next tick retries.
+    console.warn("Status poll failed", error);
+  }
+}
+
+setInterval(pollStatus, 5000);
+
+// Browsers throttle background timers to about once a minute, so the count goes
+// stale while staff are working in another window. Catch up on the way back in.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    pollStatus();
+  }
+});
+window.addEventListener("focus", pollStatus);
+window.addEventListener("pageshow", pollStatus);
 
 render(currentView).then(bindBannerStop);

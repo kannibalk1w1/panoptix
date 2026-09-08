@@ -57,7 +57,9 @@ jobs:
               "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
           ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
           if ($iscc) {
+              # panoptix.iss uses ArchitecturesAllowed=x64compatible, which needs 6.3+.
               Write-Host "Found Inno Setup at $iscc"
+              Write-Host "Version: $((Get-Item $iscc).VersionInfo.ProductVersion)"
           } else {
               Write-Host "Inno Setup is missing from the runner image, installing it"
               choco install innosetup --no-progress -y
