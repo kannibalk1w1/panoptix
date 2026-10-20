@@ -11,6 +11,7 @@ from PIL import Image
 
 from playwright.sync_api import sync_playwright, expect
 
+from panoptix_app.clips import ClipRecorder
 from panoptix_app.capture import PlaceholderCapture
 from panoptix_app.recorder import Recorder
 from panoptix_app.server import create_handler
@@ -44,7 +45,8 @@ class BrowserReviewTests(unittest.TestCase):
         for _ in range(2):
             self.recorder.capture_click(60, 60)
         self.recorder.stop()
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), create_handler(self.root, self.store, self.recorder))
+        self.clips = ClipRecorder(self.root, PlaceholderCapture())
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), create_handler(self.root, self.store, self.recorder, clips=self.clips))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.addCleanup(self.close_server)
@@ -58,6 +60,7 @@ class BrowserReviewTests(unittest.TestCase):
 
     def close_server(self):
         self.recorder.stop()
+        self.clips.close()
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)
@@ -73,6 +76,49 @@ class BrowserReviewTests(unittest.TestCase):
 
     def note(self, index):
         return self.page.locator(f'[data-event="{index}"][data-field="staff_note"]')
+
+    def test_caption_popup_saves_next_capture_title_and_context(self):
+        self.page.locator('[data-view="settings"]').click()
+        self.page.locator('[name="capture_note_hotkey_enabled"]').check()
+        self.page.locator('#settings-form button[type="submit"]').click()
+        expect(self.page.locator('#settings-save-feedback')).to_have_text("Settings saved")
+        self.page.locator('[data-view="home"]').click()
+        expect(self.page.get_by_text("Shortcut: <ctrl>+<alt>+n")).to_be_visible()
+        with patch.object(self.recorder.notes, "prompt", return_value={"title": "Open file", "staff_note": "Explain how to open a project for LMS"}) as prompt:
+            self.page.locator('[data-caption-prompt]').click()
+            expect(self.page.locator('[data-capture-note-status]')).to_contain_text("Next capture: Open file", timeout=10000)
+            prompt.assert_called_once()
+        self.recorder.start("evidence", {"activity": "LMS instructions"})
+        self.recorder.capture_click(25, 25)
+        sid = self.recorder.active_session_id
+        self.recorder.stop()
+        self.page.locator('[data-view="sessions"]').click()
+        self.page.locator(f'[data-open="{sid}"]').click()
+        expect(self.page.locator('[data-event="1"][data-field="title"]')).to_have_value("Open file")
+        expect(self.note(1)).to_have_value("Explain how to open a project for LMS")
+        self.page.locator('[data-view="home"]').click()
+        expect(self.page.locator('[data-capture-note-status]')).to_have_text("No caption pending")
+
+    def test_lms_clip_settings_recording_and_folder_controls(self):
+        self.page.locator('[data-view="settings"]').click()
+        self.page.locator('[name="clip_hotkey_enabled"]').check()
+        self.page.locator('[name="clip_duration_seconds"]').fill("1")
+        self.page.locator('[name="clip_fps"]').fill("3")
+        self.page.locator('#settings-form button[type="submit"]').click()
+        expect(self.page.locator('#settings-save-feedback')).to_have_text("Settings saved")
+        self.page.locator('[data-view="home"]').click()
+        expect(self.page.locator('[data-clip-start]')).to_be_enabled()
+        expect(self.page.get_by_text("Shortcut: <ctrl>+<alt>+r")).to_be_visible()
+        self.page.locator('[data-clip-start]').click()
+        expect(self.page.locator('[data-clip-status]')).to_contain_text("finished", timeout=10000)
+        expect(self.page.locator('[data-clip-status]')).to_contain_text("3 frames")
+        folder = Path(self.clips.status()["folder"])
+        self.assertEqual(len(list((folder / "frames").glob("*.png"))), 3)
+        self.assertTrue((folder / "clip.gif").exists())
+        with patch("panoptix_app.server.open_folder") as opener:
+            with self.page.expect_response("**/api/clips/open-folder"):
+                self.page.locator('[data-clip-folder]').click()
+            opener.assert_called_once_with(self.root / "clips")
 
     def test_drafts_survive_save_filter_navigation_and_export(self):
         self.open_review()

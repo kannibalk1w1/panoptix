@@ -344,3 +344,26 @@ Skip this section on a single-screen PC.
 - [ ] Stop during an active block; confirm automation stays stopped until the next
       separate block. Manual capture should still be available.
 - [ ] Confirm an empty timetable does not start automated capture.
+
+## LMS screen clips (Windows)
+
+- [ ] Enable the clip hotkey in Settings, choose 30 seconds and 5 fps, and save.
+- [ ] With another application focused and no evidence session running, press Ctrl+Alt+R. Check that capture stops automatically and creates PNGs, clip.json and a playable looping GIF in the clips folder.
+- [ ] Change the shortcut and frame rate, save, and confirm the new shortcut works.
+- [ ] Repeat the shortcut during recording/export; confirm no overlapping clip starts.
+- [ ] Use Home → Finish clip early; confirm the shorter clip retains its PNGs.
+- [ ] Disable GIF output; confirm only numbered PNGs and timing metadata are saved.
+- [ ] Confirm PNGs retain the entire desktop at full resolution on multiple monitors; check that the GIF fits within 960 × 960 pixels.
+- [ ] Try a slow/network storage folder; verify that playback timing remains correct if the target frame rate cannot be reached.
+- [ ] Confirm evidence recording can continue alongside a clip, and storage-folder changes are blocked until the clip finishes exporting.
+
+
+## Free-text captions before capture (Windows)
+
+- [ ] Enable the caption popup hotkey in Settings and save. With another app focused, press Ctrl+Alt+N; confirm the text box appears and receives keyboard focus.
+- [ ] Start Evidence Capture, open the popup, enter “Open file” plus a context note, and save with Enter from the title field. Confirm focus returns to the previous app. Click its Open file button; verify the screenshot has that title and note in Review and in HTML/PDF exports.
+- [ ] Confirm clicks inside the popup and its Save/Cancel buttons do not create screenshots. Automatic interval capture waits while it is open and resumes afterwards.
+- [ ] Confirm an automatic background screenshot does not consume a pending caption; a manual screenshot does.
+- [ ] Press Escape to cancel; verify the previous pending text remains. Reopen the popup to edit it or use Home → Clear pending caption.
+- [ ] Caption a clip before recording it; verify title and context in clip.json. Confirm an active clip blocks the popup and an open popup blocks starting a clip.
+- [ ] Save multiline context, Unicode text and punctuation; verify text is preserved. Change the shortcut and confirm the new shortcut works.

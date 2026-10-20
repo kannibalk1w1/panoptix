@@ -8,6 +8,7 @@ from typing import Any
 
 from .annotation import DEFAULT_MARKER, annotate_click, normalize_marker
 from .capture import ScreenCapture, to_image_coordinates
+from .capture_notes import CaptureNotes
 from .frame_diff import images_are_different
 from .hooks import GlobalMouseHook
 from .models import now_iso
@@ -29,7 +30,7 @@ def lifecycle_operation(method):
 def capture_operation(method):
     @wraps(method)
     def wrapped(self, *args, **kwargs):
-        with self._lock:
+        with self._lock, self.notes._lock:
             self._require_active()
             try:
                 with self.store.transaction():
@@ -43,7 +44,8 @@ def capture_operation(method):
 
 
 class Recorder:
-    def __init__(self, store: SessionStore, capture: Any | None = None, hook_factory: Any | None = None):
+    def __init__(self, store: SessionStore, capture: Any | None = None, hook_factory: Any | None = None, notes: CaptureNotes | None = None):
+        self.notes = notes or CaptureNotes()
         self.store = store
         self.capture = capture or ScreenCapture()
         self.hook_factory = hook_factory or GlobalMouseHook
@@ -230,11 +232,11 @@ class Recorder:
                 "cyp_quote": "",
                 "tags": [],
             }
-            return self.store.add_event(session_id, event)["events"][-1]
+            return self._save_captioned_event(session_id, event)
 
     def _queue_click_capture(self, x: int, y: int, session_id: str | None = None) -> None:
         with self._lock:
-            if self.active_session_id is None or self._stop_event.is_set() or self._pause_event.is_set():
+            if self.active_session_id is None or self._stop_event.is_set() or self._pause_event.is_set() or self.notes.status()["editing"]:
                 return
             if session_id is not None and session_id != self.active_session_id:
                 return
@@ -276,7 +278,7 @@ class Recorder:
                 "staff_note": "",
                 "highlight": True,
             }
-            saved = self.store.add_event(session_id, event)["events"][-1]
+            saved = self._save_captioned_event(session_id, event)
             self._last_saved_screenshot = screenshot.name
             return saved
 
@@ -305,6 +307,14 @@ class Recorder:
         self._last_saved_screenshot = screenshot.name
         return saved
 
+    def _save_captioned_event(self, session_id: str, event: dict) -> dict:
+        # Called with the capture and note locks held. A failed write must leave
+        # the caption pending for retry; periodic captures never consume it.
+        event.update(self.notes.status()["pending"])
+        saved = self.store.add_event(session_id, event)["events"][-1]
+        self.notes.clear()
+        return saved
+
     def _should_skip_unchanged(self, screenshot_dir, screenshot, settings: dict[str, Any]) -> bool:
         if not settings.get("change_detection"):
             return False
@@ -317,6 +327,8 @@ class Recorder:
         return not images_are_different(previous, screenshot, threshold)
 
     def _require_active(self) -> None:
+        if self.notes.status()["editing"]:
+            raise CaptureStateError("Capture waits while the caption popup is open")
         if self.active_session_id is None:
             raise CaptureStateError("No active recording")
         if self._pause_event.is_set():
@@ -329,10 +341,12 @@ class Recorder:
             with self._lock:
                 if session_id != self.active_session_id or stop_event.is_set():
                     break
-                if self._pause_event.is_set():
+                if self._pause_event.is_set() or self.notes.status()["editing"]:
                     continue
                 try:
                     self.capture_periodic()
+                except CaptureStateError:
+                    continue
                 except Exception as exc:
                     if self.active_session_id is not None:
                         self._fail_capture_locked(exc)

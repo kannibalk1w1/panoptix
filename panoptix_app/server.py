@@ -25,6 +25,7 @@ from .exporter import (
     SessionExporter,
     export_destination_status,
 )
+from .clips import ClipRecorder
 from .hotkeys import HotkeyService
 from .redaction import redact_event_screenshot, restore_original_screenshot
 from .recorder import Recorder
@@ -41,15 +42,17 @@ class DataContext:
     """Holds everything bound to the data folder so it can be swapped without
     restarting Panoptix."""
 
-    def __init__(self, root: Path, store: SessionStore, recorder: Recorder, settings_store: SettingsStore | None = None):
+    def __init__(self, root: Path, store: SessionStore, recorder: Recorder, settings_store: SettingsStore | None = None, clips: ClipRecorder | None = None):
+        self.clips = clips or ClipRecorder(root, notes=recorder.notes)
+        self.clips.notes = recorder.notes
         self.root = Path(root)
         self.store = store
         self.recorder = recorder
         self.settings_store = settings_store or SettingsStore(self.root)
 
     def switch_root(self, new_root: Path) -> bool:
-        with self.recorder._lock:
-            if self.recorder.active_session_id is not None:
+        with self.recorder._lock, self.clips._lock:
+            if self.recorder.active_session_id is not None or self.clips.status()["active"] or self.recorder.notes.status()["editing"]:
                 raise ValueError("Stop the current recording before changing the screenshot folder.")
             return self._switch_root(new_root)
 
@@ -64,6 +67,8 @@ class DataContext:
         new_settings = SettingsStore(new_root)
         if not new_settings.path.exists():
             new_settings.update(settings)
+        self.recorder.notes.clear()
+        self.clips.root = new_root
         self.root = new_root
         self.store = new_store
         self.recorder.store = new_store
@@ -87,9 +92,10 @@ def create_handler(
     startup: StartupManager | None = None,
     settings_store: SettingsStore | None = None,
     scheduler: BackgroundScheduler | None = None,
+    clips: ClipRecorder | None = None,
 ):
     frontend_dir = get_project_root() / "frontend"
-    context = DataContext(root, store, recorder, settings_store)
+    context = DataContext(root, store, recorder, settings_store, clips)
 
     def data_location_status() -> dict[str, Any]:
         status = resolve_data_root()
@@ -105,6 +111,18 @@ def create_handler(
             settings = context.settings_store.last_good
             storage_error = str(exc)
         status = recorder.status()
+        status["clip"] = {
+            **context.clips.status(),
+            "shortcut": settings.get("clip_hotkey"),
+            "hotkey_enabled": settings.get("clip_hotkey_enabled"),
+            "configured_duration_seconds": settings.get("clip_duration_seconds", 30),
+            "configured_fps": settings.get("clip_fps", 5),
+        }
+        status["capture_note"] = {
+            **recorder.notes.status(),
+            "shortcut": settings.get("capture_note_hotkey"),
+            "hotkey_enabled": settings.get("capture_note_hotkey_enabled"),
+        }
         status["storage_error"] = storage_error
         status["background"] = {
             "enabled": bool(settings.get("background_enabled")),
@@ -171,7 +189,20 @@ def create_handler(
             path = urlparse(self.path).path
             try:
                 payload = self._payload()
-                if path == "/api/record/start":
+                if path == "/api/capture-note/prompt":
+                    self._json({"capture_note": recorder.notes.open_prompt(context.clips)})
+                elif path == "/api/capture-note":
+                    self._json({"capture_note": recorder.notes.set(payload.get("title", ""), payload.get("staff_note", ""))})
+                elif path == "/api/clips/start":
+                    self._json({"clip": context.clips.start(context.settings_store.load())})
+                elif path == "/api/clips/stop":
+                    self._json({"clip": context.clips.stop()})
+                elif path == "/api/clips/open-folder":
+                    folder = context.root / "clips"
+                    folder.mkdir(parents=True, exist_ok=True)
+                    open_folder(folder)
+                    self._json({"path": str(folder)})
+                elif path == "/api/record/start":
                     session = recorder.start(
                         payload.get("mode", "evidence"),
                         payload.get("metadata", {}),
@@ -273,8 +304,8 @@ def create_handler(
                         problem = directory_problem(normalize_directory(directory))
                         if problem:
                             raise ValueError(f"That folder cannot be used: {problem}")
-                    with recorder._lock:
-                        if recorder.active_session_id is not None:
+                    with recorder._lock, context.clips._lock:
+                        if recorder.active_session_id is not None or context.clips.status()["active"] or recorder.notes.status()["editing"]:
                             raise ValueError("Stop the current recording before changing the screenshot folder.")
                         set_configured_data_directory(directory)
                         context.switch_root(Path(resolve_data_root()["path"]))
@@ -386,11 +417,12 @@ def run_server(root: Path, host: str = "127.0.0.1", port: int = 8765, on_ready: 
     recorder = Recorder(store)
     settings_store = SettingsStore(root)
     scheduler = BackgroundScheduler(recorder, settings_store)
-    hotkeys = HotkeyService(settings_store, recorder)
+    clips = ClipRecorder(root, notes=recorder.notes)
+    hotkeys = HotkeyService(settings_store, recorder, clip_recorder=clips)
     startup = StartupManager()
     # The scheduler and hotkey service share this settings store, so they follow
     # the handler when the screenshot folder is changed at runtime.
-    handler = create_handler(root, store, recorder, hotkeys, startup, settings_store, scheduler)
+    handler = create_handler(root, store, recorder, hotkeys, startup, settings_store, scheduler, clips)
     server = ThreadingHTTPServer((host, port), handler)
     tray_icon = None
     try:
@@ -408,5 +440,6 @@ def run_server(root: Path, host: str = "127.0.0.1", port: int = 8765, on_ready: 
         hotkeys.stop()
         scheduler.stop()
         recorder.stop()
+        clips.close()
         server.server_close()
     return server

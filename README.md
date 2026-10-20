@@ -171,6 +171,57 @@ installation. The Windows build workflow runs both test suites before packaging.
   not participate in locking. Shared-drive behavior still needs testing on the
   deployment's Windows/network filesystem.
 
+## Caption The Next Capture
+
+Enable **Settings → Caption next capture → Enable caption popup hotkey**, then
+save. **Ctrl+Alt+N** opens a small native Windows text box over the application
+you are using. Enter a title/instruction such as **Open file** and, optionally,
+a context note explaining what the capture is for. Press **Enter** from the
+title field (or click **Save for next capture**), then perform the action.
+**Escape** or **Cancel** closes the popup without changing any pending caption.
+The context field supports multiple lines; use the Save button to confirm it.
+
+The text attaches once to the next click screenshot in an active Evidence
+Capture session, manual screenshot, or newly started clip. It does not take a
+screenshot itself. Automatic interval screenshots leave the caption pending.
+While the popup is open, screenshot capture waits and clicks inside the popup
+are ignored. Close/finish an active clip before opening the popup.
+
+Screenshot titles and notes appear in Review and the existing HTML/PDF reports.
+Clip titles and notes are stored in `clip.json`; originals remain available for
+adding visual overlays later. On Home, **Caption next capture** opens the same
+popup, the pending text is shown, and **Clear pending caption** discards it.
+Pending captions last until consumed, cleared, the storage folder changes, or
+Panoptix exits. A failed screenshot save leaves the caption pending for retry.
+
+## LMS Screen Clips
+
+On **Home**, use **Record clip**, or enable **Settings → LMS screen clips →
+Enable clip hotkey** and save. The default shortcut is **Ctrl+Alt+R**. Panoptix
+must be running; no evidence session needs to be active. The clip records the
+next 30 seconds by default, then stops automatically. **Finish clip early** on
+Home stops capture and exports what has been recorded. Repeated shortcut presses
+while recording or exporting are ignored.
+
+Settings lets you choose a duration from 1–120 seconds, a target frame rate from
+1–30 fps (default 5), and whether to also create a looping GIF. Capture covers all
+monitors without audio. Slow screen capture or storage may produce fewer frames;
+the GIF uses the actual frame timestamps so playback keeps the captured timing.
+
+**Open clips folder** on Home opens `clips` inside the configured screenshot
+storage folder. Each timestamped clip folder contains:
+
+- `frames/frame_000000.png`, etc.: full-resolution originals for overlays/editing.
+- `clip.json`: requested settings, elapsed duration and per-frame timestamps.
+- `clip.gif`: optional looping preview, resized to fit within 960 × 960 pixels.
+
+PNGs remain available if GIF export fails. GIFs have a 256-colour palette per
+frame; use the original PNGs when editing or when full image quality matters.
+Clips are separate from evidence sessions, review annotations and evidence
+exports. They count toward storage usage but are not removed by session retention
+cleanup; remove unwanted clip folders manually. Wait for a clip to finish
+exporting before changing the screenshot storage folder.
+
 ## Weekly Capture Timetable
 
 In Settings, enable automated capture and edit the **Weekly recording timetable**.

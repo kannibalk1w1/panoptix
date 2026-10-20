@@ -104,7 +104,20 @@ async function refreshStatus() {
   if (status.capture_error) statusPill.textContent = status.capture_error;
   else if (status.storage_error) statusPill.textContent = `Storage unavailable: ${status.storage_error}`;
   else if (status.paused) statusPill.textContent += " - paused";
-  statusPill.classList.toggle("active", status.active);
+  if (status.clip?.active) statusPill.textContent += ` - clip ${status.clip.phase} (${status.clip.frame_count} frames)`;
+  statusPill.classList.toggle("active", status.active || status.clip?.active);
+  document.querySelectorAll("[data-clip-status]").forEach((element) => {
+    const clip = status.clip || {};
+    element.textContent = `${clip.phase || "idle"} — ${clip.frame_count || 0} frames${clip.error ? ` — ${clip.error}` : ""}`;
+  });
+  document.querySelectorAll("[data-clip-start]").forEach((button) => { button.disabled = !!status.clip?.active; });
+  document.querySelectorAll("[data-clip-stop]").forEach((button) => { button.disabled = status.clip?.phase !== "recording"; });
+  document.querySelectorAll("[data-capture-note-status]").forEach((element) => {
+    element.textContent = captureNoteText(status.capture_note || {});
+  });
+  document.querySelectorAll("[data-caption-prompt]").forEach((button) => {
+    button.disabled = !!status.capture_note?.editing || !!status.clip?.active;
+  });
   updateLiveStatusDisplay(status);
   if (!isRendering && !["sessions", "review", "settings", "trash"].includes(currentView) && previousSignature !== statusSignature(status)) {
     await render(currentView);
@@ -167,6 +180,8 @@ async function render(view) {
     }
     bindBannerStop();
     bindPauseResume();
+    bindClipControls();
+    bindCaptionControls();
   } finally {
     isRendering = false;
   }
@@ -177,6 +192,8 @@ function renderHome() {
   app.innerHTML = `
     ${renderActiveBanner()}
     ${renderSystemStatus()}
+    ${renderCaptionCard()}
+    ${renderClipCard()}
     <div class="grid">
       <section class="card">
         <h2>Evidence Capture</h2>
@@ -192,6 +209,64 @@ function renderHome() {
   `;
   app.querySelectorAll("[data-go]").forEach((button) => {
     button.addEventListener("click", () => render(button.dataset.go));
+  });
+}
+
+function captureNoteText(note) {
+  if (note.error) return note.error;
+  if (note.editing) return "Caption popup open — capture is waiting";
+  const text = [note.pending?.title, note.pending?.staff_note].filter(Boolean).join(" — ");
+  return text ? `Next capture: ${text}` : "No caption pending";
+}
+
+function renderCaptionCard() {
+  const note = latestStatus.capture_note || {};
+  return `<section class="card">
+    <h2>Caption next capture</h2>
+    <p class="muted">Open a text box, enter an instruction such as “Open file” or a context note, then save and perform the action. The next click capture, manual screenshot or new clip receives the text. Automatic interval screenshots leave it pending.</p>
+    <p class="muted">Click capture requires an active Evidence Capture session. The popup waits until any active clip has finished.</p>
+    <p class="muted">Shortcut: ${escapeHtml(note.hotkey_enabled ? note.shortcut : "disabled — enable in Settings")}</p>
+    <p data-capture-note-status>${escapeHtml(captureNoteText(note))}</p>
+    <div class="actions">
+      <button class="primary" data-caption-prompt ${note.editing || latestStatus.clip?.active ? "disabled" : ""}>Caption next capture</button>
+      <button class="secondary" data-caption-clear>Clear pending caption</button>
+    </div>
+  </section>`;
+}
+
+function bindCaptionControls() {
+  app.querySelectorAll("[data-caption-prompt]").forEach((button) => {
+    button.onclick = async () => { await api.post("/api/capture-note/prompt", {}); await refreshStatus(); };
+  });
+  app.querySelectorAll("[data-caption-clear]").forEach((button) => {
+    button.onclick = async () => { await api.post("/api/capture-note", {}); await refreshStatus(); };
+  });
+}
+
+function renderClipCard() {
+  const clip = latestStatus.clip || {};
+  return `<section class="card">
+    <h2>LMS screen clip</h2>
+    <p class="muted">Record the next ${escapeHtml(clip.configured_duration_seconds || 30)} seconds at ${escapeHtml(clip.configured_fps || 5)} fps. Configure duration, frame rate and GIF export in Settings. Captures all monitors, without audio.</p>
+    <p class="muted">Shortcut: ${escapeHtml(clip.hotkey_enabled ? clip.shortcut : "disabled — enable in Settings")}</p>
+    <p data-clip-status>${escapeHtml(clip.phase || "idle")} — ${escapeHtml(clip.frame_count || 0)} frames${clip.error ? ` — ${escapeHtml(clip.error)}` : ""}</p>
+    <div class="actions">
+      <button class="primary" data-clip-start ${clip.active ? "disabled" : ""}>Record clip</button>
+      <button class="secondary" data-clip-stop ${clip.phase === "recording" ? "" : "disabled"}>Finish clip early</button>
+      <button class="secondary" data-clip-folder>Open clips folder</button>
+    </div>
+  </section>`;
+}
+
+function bindClipControls() {
+  app.querySelectorAll("[data-clip-start]").forEach((button) => {
+    button.onclick = async () => { await api.post("/api/clips/start", {}); await refreshStatus(); };
+  });
+  app.querySelectorAll("[data-clip-stop]").forEach((button) => {
+    button.onclick = async () => { await api.post("/api/clips/stop", {}); await refreshStatus(); };
+  });
+  app.querySelectorAll("[data-clip-folder]").forEach((button) => {
+    button.onclick = () => api.post("/api/clips/open-folder", {});
   });
 }
 
@@ -1073,6 +1148,18 @@ async function renderSettings() {
       <label>Passive screenshot interval seconds <input name="background_interval_seconds" type="number" min="1" value="${escapeAttr(settings.background_interval_seconds)}"></label>
       <label class="check-row"><input name="background_change_detection" type="checkbox" ${settings.background_change_detection ? "checked" : ""}> Skip unchanged passive screenshots</label>
       <label>Change sensitivity threshold <input name="background_change_threshold" type="number" min="1" value="${escapeAttr(settings.background_change_threshold)}"></label>
+      <h2>Caption next capture</h2>
+      <p class="muted">Opens a Windows text box for a title/instruction and context note. Save to attach the text to the next click capture, manual screenshot or new clip. Enter saves from the title field; Escape cancels.</p>
+      <label class="check-row"><input name="capture_note_hotkey_enabled" type="checkbox" ${settings.capture_note_hotkey_enabled ? "checked" : ""}> Enable caption popup hotkey</label>
+      <label>Caption popup hotkey <input name="capture_note_hotkey" value="${escapeAttr(settings.capture_note_hotkey)}" placeholder="<ctrl>+<alt>+n"></label>
+      <h2>LMS screen clips</h2>
+      <p class="muted">Each clip keeps numbered, full-resolution PNGs and timing information in the screenshot storage folder under clips. GIFs loop and fit within 960 × 960 pixels. Clips are separate from evidence sessions and their retention cleanup; remove unwanted clip folders manually.</p>
+      <label class="check-row"><input name="clip_hotkey_enabled" type="checkbox" ${settings.clip_hotkey_enabled ? "checked" : ""}> Enable clip hotkey</label>
+      <label>Clip hotkey <input name="clip_hotkey" value="${escapeAttr(settings.clip_hotkey)}" placeholder="<ctrl>+<alt>+r"></label>
+      <label>Clip duration seconds <input name="clip_duration_seconds" type="number" min="1" max="120" value="${escapeAttr(settings.clip_duration_seconds)}"></label>
+      <label>Clip frames per second <input name="clip_fps" type="number" min="1" max="30" value="${escapeAttr(settings.clip_fps)}"></label>
+      <label class="check-row"><input name="clip_make_gif" type="checkbox" ${settings.clip_make_gif ? "checked" : ""}> Also create an animated GIF</label>
+      <p class="muted">Frame rate is a target; slower capture or storage may save fewer frames. PNGs are always kept for overlays and editing.</p>
       <h2>Manual capture hotkey</h2>
       <label class="check-row"><input name="launch_on_startup" type="checkbox" ${settings.launch_on_startup ? "checked" : ""}> Open Panoptix with Windows startup</label>
       <label class="check-row"><input name="manual_hotkey_enabled" type="checkbox" ${settings.manual_hotkey_enabled ? "checked" : ""}> Enable manual CYP capture hotkey</label>
@@ -1118,6 +1205,13 @@ async function renderSettings() {
       background_interval_seconds: Number(form.get("background_interval_seconds")),
       background_change_detection: form.get("background_change_detection") === "on",
       background_change_threshold: Number(form.get("background_change_threshold")),
+      capture_note_hotkey_enabled: form.get("capture_note_hotkey_enabled") === "on",
+      capture_note_hotkey: form.get("capture_note_hotkey"),
+      clip_hotkey_enabled: form.get("clip_hotkey_enabled") === "on",
+      clip_hotkey: form.get("clip_hotkey"),
+      clip_duration_seconds: Number(form.get("clip_duration_seconds")),
+      clip_fps: Number(form.get("clip_fps")),
+      clip_make_gif: form.get("clip_make_gif") === "on",
       manual_hotkey_enabled: form.get("manual_hotkey_enabled") === "on",
       manual_hotkey: form.get("manual_hotkey"),
       launch_on_startup: form.get("launch_on_startup") === "on",

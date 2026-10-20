@@ -19,6 +19,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "background_change_threshold": 4,
     "manual_hotkey_enabled": True,
     "manual_hotkey": "<ctrl>+<alt>+p",
+    "capture_note_hotkey_enabled": False,
+    "capture_note_hotkey": "<ctrl>+<alt>+n",
+    "clip_hotkey_enabled": False,
+    "clip_hotkey": "<ctrl>+<alt>+r",
+    "clip_duration_seconds": 30,
+    "clip_fps": 5,
+    "clip_make_gif": True,
     "launch_on_startup": False,
     "retention_days": 30,
     "storage_warning_mb": 500,
@@ -63,6 +70,17 @@ class SettingsStore:
         for key in DEFAULT_SETTINGS:
             if key in changes:
                 settings[key] = self._coerce(key, changes[key])
+        shortcuts = {}
+        for prefix in ("manual", "clip", "capture_note"):
+            if not settings[f"{prefix}_hotkey_enabled"]:
+                continue
+            shortcut = settings[f"{prefix}_hotkey"].strip()
+            if not shortcut:
+                raise ValueError(f"Enter a {prefix.replace('_', ' ')} hotkey before enabling it")
+            keys = frozenset(shortcut.lower().replace(" ", "").split("+"))
+            if keys in shortcuts:
+                raise ValueError("Capture hotkeys must be different")
+            shortcuts[keys] = prefix
         self.path.parent.mkdir(parents=True, exist_ok=True)
         write_json(self.path, settings)
         self.last_good = dict(settings)
@@ -70,9 +88,15 @@ class SettingsStore:
 
     @staticmethod
     def _coerce(key: str, value: Any) -> Any:
+        if key in {"clip_duration_seconds", "clip_fps"}:
+            number = int(value)
+            limit = 120 if key == "clip_duration_seconds" else 30
+            if not 1 <= number <= limit:
+                raise ValueError(f"{key} must be between 1 and {limit}")
+            return number
         if key == "background_weekly_schedule":
             return validate_weekly_schedule(value)
-        if key in {"background_enabled", "background_change_detection", "manual_hotkey_enabled", "launch_on_startup"}:
+        if key in {"background_enabled", "background_change_detection", "manual_hotkey_enabled", "launch_on_startup", "clip_hotkey_enabled", "clip_make_gif", "capture_note_hotkey_enabled"}:
             if isinstance(value, str):
                 return value.strip().lower() in {"1", "true", "yes", "on"}
             return bool(value)
