@@ -51,6 +51,9 @@ class Recorder:
         self.hook_factory = hook_factory or GlobalMouseHook
         self.active_session_id: str | None = None
         self.active_mode: str | None = None
+        self._click_capture_enabled = False
+        self._session_metadata: dict = {}
+        self._session_settings: dict = {}
         self.started_at: datetime | None = None
         self._lock = threading.RLock()
         self._lifecycle_lock = threading.RLock()
@@ -89,6 +92,8 @@ class Recorder:
             "event_count": event_count,
             "paused": self._pause_event.is_set(),
             "skipped_unchanged": self._skipped_unchanged,
+            "click_capture_enabled": self._click_capture_enabled,
+            "lms": {"metadata": dict(self._session_metadata), "settings": dict(self._session_settings)} if self.active_mode == "lms" else None,
         }
 
     @lifecycle_operation
@@ -104,10 +109,22 @@ class Recorder:
             interval = float((settings or {}).get("interval_seconds", 60))
             if not math.isfinite(interval) or interval <= 0:
                 raise ValueError("Screenshot interval must be a positive finite number")
+            if mode == "lms":
+                settings = dict(settings or {})
+                for key, default, limit in (("clip_duration_seconds", 30, 120), ("clip_fps", 5, 30)):
+                    value = int(settings.get(key, default))
+                    if not 1 <= value <= limit:
+                        raise ValueError(f"{key} must be between 1 and {limit}")
+                    settings[key] = value
+                settings["clip_make_gif"] = settings.get("clip_make_gif", True) is True
+                settings["capture_clicks"] = settings.get("capture_clicks", False) is True
             self._stop_hook()
             session = self.store.create_session(mode, metadata or {}, settings or {})
             self.active_session_id = session["id"]
             self.active_mode = mode
+            self._session_metadata = dict(session["metadata"])
+            self._session_settings = dict(session["settings"])
+            self._click_capture_enabled = mode == "evidence" or (mode == "lms" and self._session_settings["capture_clicks"])
             self.started_at = datetime.now()
             self.hook_error = None
             self.capture_error = None
@@ -122,7 +139,7 @@ class Recorder:
                     daemon=True,
                 )
                 self._observation_thread.start()
-            if mode == "evidence":
+            if self._click_capture_enabled:
                 self._mouse_hook = self.hook_factory(lambda x, y: self._queue_click_capture(x, y, session["id"]))
                 try:
                     self._mouse_hook.start()
@@ -166,6 +183,9 @@ class Recorder:
     def _clear_active(self) -> None:
         self.active_session_id = None
         self.active_mode = None
+        self._click_capture_enabled = False
+        self._session_metadata = {}
+        self._session_settings = {}
         self.started_at = None
         self._pause_event.clear()
         self._last_saved_screenshot = None
@@ -180,6 +200,21 @@ class Recorder:
             pass  # Keep the original capture error visible even if storage is offline.
         self._clear_active()
         self._stop_hook()
+
+    def lms_context(self) -> dict:
+        with self._lock:
+            if self.active_mode != "lms":
+                return {}
+            self._require_active()
+            return {
+                "mode": "lms", "session_id": self.active_session_id,
+                "metadata": dict(self._session_metadata),
+                "clip_settings": {key: self._session_settings[key] for key in ("clip_duration_seconds", "clip_fps", "clip_make_gif")},
+            }
+
+    def lms_clip_active(self, session_id: str) -> bool:
+        with self._lock:
+            return self.active_session_id == session_id and self.active_mode == "lms" and not self._pause_event.is_set()
 
     def delete_session(self, session_id: str) -> None:
         with self._lock:
@@ -204,8 +239,8 @@ class Recorder:
     def capture_click(self, x: int, y: int, desktop_geometry: dict | None = None) -> dict[str, Any]:
         with self._lock:
             self._require_active()
-            if self.active_mode != "evidence":
-                raise CaptureStateError("Click capture is only available in evidence mode")
+            if not self._click_capture_enabled:
+                raise CaptureStateError("Click capture is only available in evidence mode or an LMS session with click capture enabled")
             session_id = self.active_session_id
             filename = self.store.next_screenshot_name(session_id)
             screenshot_dir = self.store.screenshot_dir(session_id)
@@ -276,10 +311,10 @@ class Recorder:
             filename = self.store.next_screenshot_name(session_id)
             screenshot = self.capture.capture(self.store.screenshot_dir(session_id), filename)
             event = {
-                "type": "manual_hotkey",
+                "type": "lms_screenshot" if self.active_mode == "lms" else "manual_hotkey",
                 "timestamp": now_iso(),
                 "screenshot": screenshot.name,
-                "title": "Manual CYP capture",
+                "title": "LMS screenshot" if self.active_mode == "lms" else "Manual CYP capture",
                 "staff_note": "",
                 "highlight": True,
             }
@@ -289,6 +324,8 @@ class Recorder:
 
     def _capture_periodic_locked(self) -> dict[str, Any]:
         self._require_active()
+        if self.active_mode == "lms":
+            raise CaptureStateError("Use a manual screenshot, click capture or clip in LMS Content Capture")
         session_id = self.active_session_id
         filename = self.store.next_screenshot_name(session_id)
         screenshot_dir = self.store.screenshot_dir(session_id)

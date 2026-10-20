@@ -45,6 +45,8 @@ def export_gif(folder: Path, frames: list[dict], duration: float) -> None:
 
 class ClipRecorder:
     def __init__(self, root: Path, capture=None, notes: CaptureNotes | None = None):
+        self.context_provider = lambda: {}
+        self.session_active = lambda session_id: True
         self.notes = notes or CaptureNotes()
         self.root = Path(root)
         self.capture = capture or ScreenCapture()
@@ -58,6 +60,8 @@ class ClipRecorder:
             return dict(self._status)
 
     def start(self, settings: dict) -> dict:
+        context = self.context_provider()
+        settings = {**settings, **context.get("clip_settings", {})}
         seconds = int(settings.get("clip_duration_seconds", 30))
         fps = int(settings.get("clip_fps", 5))
         if not 1 <= seconds <= 120 or not 1 <= fps <= 30:
@@ -67,12 +71,15 @@ class ClipRecorder:
                 raise RuntimeError("Close the caption popup before starting a clip")
             if self._status["active"]:
                 raise RuntimeError("A clip is already recording or exporting")
-            folder = self.root / "clips" / (datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid4().hex[:8])
+            parent = self.root / "clips"
+            if context.get("mode") == "lms":
+                parent /= context["session_id"]
+            folder = parent / (datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid4().hex[:8])
             (folder / "frames").mkdir(parents=True)
             self._stop = threading.Event()
             self._status = {"active": True, "phase": "recording", "frame_count": 0,
-                            "folder": str(folder), "error": None, "duration_seconds": seconds, "fps": fps}
-            self._thread = threading.Thread(target=self._run, args=(folder, seconds, fps, bool(settings.get("clip_make_gif", True)), self.notes.status()["pending"]), daemon=True)
+                            "folder": str(folder), "error": None, "duration_seconds": seconds, "fps": fps, "session_id": context.get("session_id")}
+            self._thread = threading.Thread(target=self._run, args=(folder, seconds, fps, bool(settings.get("clip_make_gif", True)), self.notes.status()["pending"], context), daemon=True)
             self._thread.start()
             self.notes.clear()
             return dict(self._status)
@@ -90,13 +97,15 @@ class ClipRecorder:
         with self._lock:
             self._status.update(changes)
 
-    def _run(self, folder: Path, seconds: int, fps: int, make_gif: bool, caption: dict):
+    def _run(self, folder: Path, seconds: int, fps: int, make_gif: bool, caption: dict, context: dict):
         frames = []
         start = time.monotonic()
         error = None
         try:
             slot = 0
             while not self._stop.is_set():
+                if context.get("mode") == "lms" and not self.session_active(context["session_id"]):
+                    break
                 elapsed = time.monotonic() - start
                 if elapsed >= seconds:
                     break
@@ -112,7 +121,7 @@ class ClipRecorder:
             error = f"Clip capture failed: {exc}"
         duration = min(seconds, time.monotonic() - start)
         try:
-            manifest = {**caption, "requested_fps": fps, "requested_duration_seconds": seconds,
+            manifest = {**context, **caption, "requested_fps": fps, "requested_duration_seconds": seconds,
                         "duration_seconds": duration, "frames": frames, "capture_error": error}
             if not frames and caption:
                 # No item was collected; retain its caption unless another one

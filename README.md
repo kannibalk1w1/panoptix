@@ -21,7 +21,7 @@ Native x86_64 Linux downloads are attached to Linux-enabled releases:
   `sudo pacman -U ./panoptix-<version>-1-x86_64.pkg.tar.zst`, then launch Panoptix
   from the application menu or run `panoptix`.
 - `panoptix-<version>-linux-x86_64.tar.gz`: extract, install system dependencies
-  `sudo pacman -S --needed spectacle kdialog xdg-utils`, then run `./panoptix`
+  `sudo pacman -S --needed spectacle kdialog xdg-utils python-pyqt6`, then run `./panoptix`
   inside the extracted folder. Keep the `_internal` folder alongside the binary.
 
 On KDE Wayland, screenshots use Spectacle rather than Xwayland. Caption and folder
@@ -98,6 +98,15 @@ Then open:
 ```text
 http://127.0.0.1:8765
 ```
+
+## Close And Quit
+
+Closing the browser dashboard leaves Panoptix running for background capture.
+Use **Quit Panoptix** in the tray menu or dashboard sidebar to exit the application,
+stop capture and finish any in-progress clip. The tray icon is hidden during
+shutdown. You can also run `panoptix --quit` on Linux (or `Panoptix.exe --quit` on
+Windows). Linux uses a native Qt/KDE tray icon with a right-click menu, including Quit.
+The native Arch package installs python-pyqt6 for this integration.
 
 ## Current MVP
 
@@ -242,6 +251,28 @@ installation. The Windows build workflow runs both test suites before packaging.
   Every PC writing to the same folder should use this version; older versions do
   not participate in locking. Shared-drive behavior still needs testing on the
   deployment's Windows/network filesystem.
+
+## LMS Content Capture Mode
+
+Choose **LMS Content Capture** beside Evidence Capture and Observation Mode.
+Enter a lesson title, course/module, author and learning objective/context. Choose
+clip duration, target frame rate and GIF output for this lesson. Screenshot and
+clip shortcuts continue to work, using these lesson settings.
+
+Manual screenshots are the default. Enable **Automatically capture left clicks**
+when you want a screenshot for each action; KDE Wayland uses the existing KWin
+click extension. There is no automatic interval capture in LMS mode.
+
+The active lesson screen provides **Caption next capture**, **Capture screenshot**,
+**Record clip**, **Open lesson clips folder**, and **Finish and review**. Captions
+apply once, and the lesson context remains attached to the session. Pausing or
+finishing the lesson finishes its current clip. Resume to collect more content.
+
+Screenshots appear in Sessions/Review and the existing HTML/PDF and image exports.
+Lesson clips are grouped under `clips/<session-id>/<clip-id>/`, retaining GIFs,
+original PNG frames and metadata including the course, lesson, context and caption.
+Review also has an **Open lesson clips folder** button. Clip files remain separate
+from screenshot report/evidence-pack exports and session retention cleanup.
 
 ## Caption The Next Capture
 

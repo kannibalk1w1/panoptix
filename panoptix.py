@@ -23,7 +23,7 @@ def is_already_running(host: str = HOST, port: int = PORT) -> bool:
 
 
 def send_action(action: str, host: str = HOST, port: int = PORT) -> None:
-    routes = {"caption": "/api/capture-note/prompt", "clip": "/api/clips/start", "capture": "/api/capture/manual"}
+    routes = {"caption": "/api/capture-note/prompt", "clip": "/api/clips/start", "capture": "/api/capture/manual", "quit": "/api/app/quit"}
     request = Request(f"http://{host}:{port}{routes[action]}", data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urlopen(request, timeout=30) as response:
@@ -44,10 +44,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--background", action="store_true")
     actions = parser.add_mutually_exclusive_group()
-    for action in ("caption", "clip", "capture"):
+    for action in ("caption", "clip", "capture", "quit"):
         actions.add_argument(f"--{action}", action="store_true", help=f"Send the {action} action to the running Panoptix instance")
     args = parser.parse_args()
-    for action in ("caption", "clip", "capture"):
+    for action in ("caption", "clip", "capture", "quit"):
         if getattr(args, action):
             try:
                 send_action(action)

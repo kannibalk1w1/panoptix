@@ -4,7 +4,7 @@ from pathlib import Path
 project_root = Path.cwd()
 a = Analysis(
     ['panoptix.py'], pathex=[str(project_root)],
-    binaries=[], datas=[('frontend', 'frontend')],
+    binaries=[], datas=[('frontend', 'frontend'), ('panoptix_app/qt_tray.py', 'helpers')],
     hiddenimports=['pynput.keyboard._xorg', 'pynput.mouse._xorg', 'pystray._xorg'],
     hookspath=[], hooksconfig={}, runtime_hooks=[],
     excludes=['gi'], noarchive=False,

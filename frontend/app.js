@@ -7,6 +7,7 @@ let latestStatus = { active: false };
 let reviewFilter = "all";
 let reviewSearch = "";
 let isRendering = false;
+let appQuitting = false;
 let settingsFeedback = "";
 let dataLocationFeedback = "";
 let reviewSession = null;
@@ -86,13 +87,33 @@ window.addEventListener("beforeunload", (event) => {
 app.addEventListener("input", rememberReviewDrafts);
 app.addEventListener("change", rememberReviewDrafts);
 
-document.querySelectorAll(".sidebar button").forEach((button) => {
+document.querySelectorAll(".sidebar button[data-view]").forEach((button) => {
   button.addEventListener("click", () => render(button.dataset.view));
 });
+
+document.querySelector("#quit-app").onclick = async (event) => {
+  rememberReviewDrafts();
+  if (reviewDrafts.size && !confirm("Quit Panoptix and discard unsaved review edits?")) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await api.post("/api/app/quit", {});
+    appQuitting = true;
+    reviewDrafts.clear();
+    clearInterval(statusTimer);
+    statusPill.textContent = "Panoptix closed";
+    statusPill.classList.remove("active");
+    app.innerHTML = '<section class="card"><h2>Panoptix has quit</h2><p>You can close this browser tab. Start Panoptix again to capture more content.</p></section>';
+  } catch (error) {
+    button.disabled = false;
+    throw error;
+  }
+};
 
 async function refreshStatus() {
   const previousSignature = statusSignature(latestStatus);
   const status = await api.get("/api/status");
+  if (appQuitting) return status;
   latestStatus = status;
   statusPill.textContent = status.active ? `${status.mode} recording - ${status.event_count} screenshots` : "Idle";
   if (status.active && status.mode === "background" && status.skipped_unchanged) {
@@ -110,13 +131,16 @@ async function refreshStatus() {
     const clip = status.clip || {};
     element.textContent = `${clip.phase || "idle"} — ${clip.frame_count || 0} frames${clip.error ? ` — ${clip.error}` : ""}`;
   });
-  document.querySelectorAll("[data-clip-start]").forEach((button) => { button.disabled = !!status.clip?.active; });
+  document.querySelectorAll("[data-clip-start]").forEach((button) => { button.disabled = !!status.clip?.active || (status.mode === "lms" && status.paused); });
   document.querySelectorAll("[data-clip-stop]").forEach((button) => { button.disabled = status.clip?.phase !== "recording"; });
   document.querySelectorAll("[data-capture-note-status]").forEach((element) => {
     element.textContent = captureNoteText(status.capture_note || {});
   });
   document.querySelectorAll("[data-caption-prompt]").forEach((button) => {
     button.disabled = !!status.capture_note?.editing || !!status.clip?.active;
+  });
+  document.querySelectorAll("[data-lms-screenshot]").forEach((button) => {
+    button.disabled = status.mode !== "lms" || status.paused || !!status.capture_note?.editing;
   });
   updateLiveStatusDisplay(status);
   if (!isRendering && !["sessions", "review", "settings", "trash"].includes(currentView) && previousSignature !== statusSignature(status)) {
@@ -152,7 +176,7 @@ function updateLiveStatusDisplay(status) {
 
 function setActive(view) {
   currentView = view;
-  document.querySelectorAll(".sidebar button").forEach((button) => {
+  document.querySelectorAll(".sidebar button[data-view]").forEach((button) => {
     button.classList.toggle("active", button.dataset.view === view);
   });
 }
@@ -169,6 +193,8 @@ async function render(view) {
       await renderStartForm("evidence", "Evidence Capture");
     } else if (view === "observation") {
       await renderStartForm("observation", "Observation Mode");
+    } else if (view === "lms") {
+      await renderLms();
     } else if (view === "sessions") {
       await renderSessions();
     } else if (view === "review") {
@@ -192,6 +218,7 @@ function renderHome() {
   app.innerHTML = `
     ${renderActiveBanner()}
     ${renderSystemStatus()}
+    <p class="muted">Closing this browser tab leaves Panoptix running. Use Quit Panoptix in the sidebar or tray menu to exit.</p>
     ${renderCaptionCard()}
     ${renderClipCard()}
     <div class="grid">
@@ -199,6 +226,11 @@ function renderHome() {
         <h2>Evidence Capture</h2>
         <p class="muted">Use this when staff need direct evidence now: clicks, marked screenshots, and notes.</p>
         <button class="primary" data-go="evidence">Start evidence capture</button>
+      </section>
+      <section class="card">
+        <h2>LMS Content Capture</h2>
+        <p class="muted">Build lesson content with captioned screenshots, step captures and timed clips.</p>
+        <button class="primary" data-go="lms">Start LMS content capture</button>
       </section>
       <section class="card">
         <h2>Observation Mode</h2>
@@ -224,8 +256,8 @@ function renderCaptionCard() {
   return `<section class="card">
     <h2>Caption next capture</h2>
     ${latestStatus.desktop?.wayland ? `<p class="muted">On KDE Wayland, assign <code>panoptix --caption</code>, <code>panoptix --clip</code> and <code>panoptix --capture</code> in Plasma Settings → Keyboard → Shortcuts. Start a session before taking manual screenshots. For automatic click capture, install and enable the Panoptix click capture KWin effect. ${latestStatus.desktop?.click_bridge_connected ? "Click bridge connected." : "Click bridge not connected."}</p>` : ""}
-    <p class="muted">Open a text box, enter an instruction such as “Open file” or a context note, then save and perform the action. The next click capture, manual screenshot or new clip receives the text. Automatic interval screenshots leave it pending.</p>
-    <p class="muted">Click capture requires an active Evidence Capture session. The popup waits until any active clip has finished.</p>
+    <p class="muted">Open a text box, enter an instruction such as “Open file” or a context note, then save and perform the action. The next enabled click capture, manual screenshot or new clip receives the text. Automatic interval screenshots leave it pending.</p>
+    <p class="muted">Click capture requires Evidence Capture or an LMS session with automatic click capture enabled. The popup waits until any active clip has finished.</p>
     <p class="muted">Shortcut: ${escapeHtml(note.hotkey_enabled ? note.shortcut : "disabled — enable in Settings")}</p>
     <p data-capture-note-status>${escapeHtml(captureNoteText(note))}</p>
     <div class="actions">
@@ -252,7 +284,7 @@ function renderClipCard() {
     <p class="muted">Shortcut: ${escapeHtml(clip.hotkey_enabled ? clip.shortcut : "disabled — enable in Settings")}</p>
     <p data-clip-status>${escapeHtml(clip.phase || "idle")} — ${escapeHtml(clip.frame_count || 0)} frames${clip.error ? ` — ${escapeHtml(clip.error)}` : ""}</p>
     <div class="actions">
-      <button class="primary" data-clip-start ${clip.active ? "disabled" : ""}>Record clip</button>
+      <button class="primary" data-clip-start ${clip.active || (latestStatus.mode === "lms" && latestStatus.paused) ? "disabled" : ""}>Record clip</button>
       <button class="secondary" data-clip-stop ${clip.phase === "recording" ? "" : "disabled"}>Finish clip early</button>
       <button class="secondary" data-clip-folder>Open clips folder</button>
     </div>
@@ -269,6 +301,72 @@ function bindClipControls() {
   app.querySelectorAll("[data-clip-folder]").forEach((button) => {
     button.onclick = () => api.post("/api/clips/open-folder", {});
   });
+}
+
+async function renderLms() {
+  title.textContent = "LMS Content Capture";
+  const active = latestStatus.active && latestStatus.mode === "lms";
+  if (active) {
+    const metadata = latestStatus.lms?.metadata || {};
+    const sessionId = latestStatus.session_id;
+    app.innerHTML = `
+      ${renderActiveBanner()}
+      <section class="card">
+        <h2>${escapeHtml(metadata.activity || "Untitled lesson")}</h2>
+        <p class="muted">${escapeHtml(metadata.course || "")}</p>
+        <p>${escapeHtml(metadata.learning_context || "")}</p>
+        <p class="muted">${latestStatus.click_capture_enabled ? "Automatic click capture is enabled." : "Capture each step with a screenshot shortcut or the button below."} Captions and context notes are saved with your content.</p>
+        <p class="muted">Pausing or finishing the lesson finishes its current clip. Review exports screenshots; the lesson clips folder contains GIFs, PNG frames and clip metadata.</p>
+        <div class="actions">
+          <button class="primary" data-lms-screenshot ${latestStatus.paused ? "disabled" : ""}>Capture screenshot</button>
+          <button class="secondary" id="lms-open-clips">Open lesson clips folder</button>
+          <button class="primary" id="lms-finish">Finish and review</button>
+        </div>
+      </section>
+      ${renderCaptionCard()}
+      ${renderClipCard()}
+    `;
+    app.querySelector("[data-lms-screenshot]").onclick = async () => {
+      await api.post("/api/capture/manual", {});
+      await refreshStatus();
+    };
+    app.querySelector("#lms-open-clips").onclick = () => api.post("/api/lms/open-clips", { session_id: sessionId });
+    app.querySelector("#lms-finish").onclick = async () => {
+      await api.post("/api/record/stop", {});
+      await refreshStatus();
+      await renderReview(sessionId);
+    };
+    return;
+  }
+  const { settings } = await api.get("/api/settings");
+  app.innerHTML = `
+    ${renderActiveBanner()}
+    <form class="card form" id="lms-start-form">
+      <h2>Prepare a lesson</h2>
+      <p class="muted">Collect screenshots and clips for a lesson, with instructions and context attached as you work.</p>
+      <label>Course / module <input name="course" autocomplete="off"></label>
+      <label>Lesson title <input name="activity" required autocomplete="off"></label>
+      <label>Learning objective / context <textarea name="learning_context"></textarea></label>
+      <label>Author <input name="staff" autocomplete="off"></label>
+      <label class="check-row"><input type="checkbox" name="capture_clicks"> Automatically capture left clicks</label>
+      ${latestStatus.desktop?.wayland ? '<p class="muted">Automatic clicks require the Panoptix KWin effect. Plasma shortcuts for panoptix --caption, --capture and --clip also work in this mode.</p>' : ''}
+      <label>Clip duration seconds <input type="number" name="clip_duration_seconds" min="1" max="120" value="${escapeAttr(settings.clip_duration_seconds)}"></label>
+      <label>Clip frames per second <input type="number" name="clip_fps" min="1" max="30" value="${escapeAttr(settings.clip_fps)}"></label>
+      <label class="check-row"><input type="checkbox" name="clip_make_gif" ${settings.clip_make_gif ? "checked" : ""}> Also create animated GIFs (PNG frames are always kept)</label>
+      ${latestStatus.active || latestStatus.clip?.active ? '<p class="muted">Finish the current recording or clip before starting an LMS lesson.</p>' : ''}
+      <button class="primary" type="submit" ${latestStatus.active || latestStatus.clip?.active ? "disabled" : ""}>Start LMS content capture</button>
+    </form>
+  `;
+  app.querySelector("#lms-start-form").onsubmit = async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await api.post("/api/record/start", {
+      mode: "lms",
+      metadata: { activity: form.get("activity"), course: form.get("course"), learning_context: form.get("learning_context"), staff: form.get("staff"), purpose: "LMS content" },
+      settings: { capture_clicks: form.get("capture_clicks") === "on", clip_duration_seconds: Number(form.get("clip_duration_seconds")), clip_fps: Number(form.get("clip_fps")), clip_make_gif: form.get("clip_make_gif") === "on", marker: { shape: settings.marker_shape, color: settings.marker_color, size: settings.marker_size, stroke: settings.marker_stroke } },
+    });
+    await render("lms");
+  };
 }
 
 async function renderStartForm(mode, heading) {
@@ -439,7 +537,9 @@ function renderActiveBanner() {
   }
   const mode = latestStatus.mode === "observation"
     ? "Observation Mode"
-    : latestStatus.mode === "background"
+    : latestStatus.mode === "lms"
+      ? "LMS Content Capture"
+      : latestStatus.mode === "background"
       ? "Background Capture"
       : "Evidence Capture";
   const elapsed = formatElapsed(latestStatus.elapsed_seconds || 0);
@@ -539,6 +639,7 @@ async function renderReview(sessionId, preserveVisible = true) {
     <section class="card">
       <h2>${escapeHtml(metadata.activity || session.id)}</h2>
       <p class="muted">${escapeHtml(session.mode)} - ${escapeHtml(session.started)} - ${events.length} screenshots - ${selectedImageCount} selected for export</p>
+      ${session.mode === "lms" ? `<p class="muted">${escapeHtml(metadata.course || "")} — ${escapeHtml(metadata.learning_context || "")}</p><button class="secondary" id="review-lms-clips">Open lesson clips folder</button>` : ""}
       <label class="check-row privacy-check">
         <input id="privacy-review-confirmed" type="checkbox">
         Personal data check: I have checked selected screenshots for personal data before submission.
@@ -584,6 +685,8 @@ async function renderReview(sessionId, preserveVisible = true) {
     </section>
   `;
   app.querySelector("#back-sessions").addEventListener("click", renderSessions);
+  const lessonClipsButton = app.querySelector("#review-lms-clips");
+  if (lessonClipsButton) lessonClipsButton.onclick = () => api.post("/api/lms/open-clips", { session_id: sessionId });
   app.querySelector("#open-export-folder").onclick = () => api.post("/api/exports/open-folder", { session_id: sessionId });
   app.querySelector("#save-all-notes").onclick = async (event) => {
     event.currentTarget.disabled = true;
@@ -1336,9 +1439,11 @@ function renderMarkerOption(value, selectedValue) {
 }
 
 async function pollStatus() {
+  if (appQuitting) return;
   try {
     await refreshStatus();
   } catch (error) {
+    if (appQuitting) return;
     // A dropped poll must not kill the timer; the next tick retries.
     statusPill.textContent = "Cannot reach Panoptix - recording status is unknown";
     statusPill.classList.toggle("active", false);
@@ -1346,7 +1451,7 @@ async function pollStatus() {
   }
 }
 
-setInterval(pollStatus, 5000);
+const statusTimer = setInterval(pollStatus, 5000);
 
 // Browsers throttle background timers to about once a minute, so the count goes
 // stale while staff are working in another window. Catch up on the way back in.

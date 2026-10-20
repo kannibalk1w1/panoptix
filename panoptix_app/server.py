@@ -4,6 +4,9 @@ import json
 import mimetypes
 import time
 import math
+import logging
+import signal
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
@@ -38,7 +41,7 @@ from .settings import SettingsStore
 from .startup import StartupManager
 from .storage import SessionStore
 from .storage_usage import get_storage_usage
-from .tray import start_tray
+from .tray import start_tray, stop_tray, request_shutdown
 
 
 class DataContext:
@@ -48,6 +51,8 @@ class DataContext:
     def __init__(self, root: Path, store: SessionStore, recorder: Recorder, settings_store: SettingsStore | None = None, clips: ClipRecorder | None = None):
         self.clips = clips or ClipRecorder(root, notes=recorder.notes)
         self.clips.notes = recorder.notes
+        self.clips.context_provider = recorder.lms_context
+        self.clips.session_active = recorder.lms_clip_active
         self.root = Path(root)
         self.store = store
         self.recorder = recorder
@@ -117,14 +122,15 @@ def create_handler(
         status = recorder.status()
         connected = time.monotonic() - bridge_state["last_seen"] < 4
         status["desktop"] = {"wayland": is_wayland(), "kde": is_kde(), "click_bridge_connected": connected}
-        if is_wayland() and status["active"] and status["mode"] == "evidence" and not connected:
+        if is_wayland() and status["active"] and status["click_capture_enabled"] and not connected:
             status["hook_error"] = "Enable the Panoptix click capture KWin effect, or use manual screenshots."
+        clip_config = {**settings, **(status.get("lms") or {}).get("settings", {})}
         status["clip"] = {
             **context.clips.status(),
             "shortcut": settings.get("clip_hotkey"),
             "hotkey_enabled": settings.get("clip_hotkey_enabled"),
-            "configured_duration_seconds": settings.get("clip_duration_seconds", 30),
-            "configured_fps": settings.get("clip_fps", 5),
+            "configured_duration_seconds": clip_config.get("clip_duration_seconds", 30),
+            "configured_fps": clip_config.get("clip_fps", 5),
         }
         status["capture_note"] = {
             **recorder.notes.status(),
@@ -171,7 +177,7 @@ def create_handler(
                 elif path == "/api/desktop/kwin":
                     bridge_state["last_seen"] = time.monotonic()
                     state = recorder.status()
-                    self._json({"active": state["active"] and state["mode"] == "evidence" and not state["paused"] and not recorder.notes.status()["editing"], "session_id": state["session_id"]})
+                    self._json({"active": state["active"] and state["click_capture_enabled"] and not state["paused"] and not recorder.notes.status()["editing"], "session_id": state["session_id"]})
                 elif path == "/api/settings":
                     settings = context.settings_store.load()
                     self._json({"settings": settings, "timetable": timetable_for_editor(settings)})
@@ -201,15 +207,22 @@ def create_handler(
             path = urlparse(self.path).path
             try:
                 payload = self._payload()
-                if path == "/api/desktop/kwin-click":
+                if path == "/api/app/quit":
+                    self._json({"quitting": True})
+                    request_shutdown(self.server)
+                elif path == "/api/desktop/kwin-click":
                     geometry = payload.get("desktop_geometry", {})
                     values = [payload.get("x"), payload.get("y"), *(geometry.get(key) for key in ("left", "top", "width", "height"))]
                     if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in values) or geometry["width"] <= 0 or geometry["height"] <= 0:
                         raise ValueError("Click coordinates and desktop geometry must be finite, with positive dimensions")
                     state = recorder.status()
-                    if state["mode"] == "evidence" and payload.get("session_id") == state["session_id"]:
+                    if state["click_capture_enabled"] and payload.get("session_id") == state["session_id"]:
                         recorder._queue_click_capture(payload["x"], payload["y"], payload["session_id"], geometry)
                     self._json({"ok": True})
+                elif path == "/api/tray/start-background":
+                    settings = context.settings_store.load()
+                    session = recorder.start("background", {"activity": "Manual passive capture", "purpose": settings.get("default_evidence_purpose", "UAS evidence")}, {"interval_seconds": settings.get("background_interval_seconds", 5), "change_detection": settings.get("background_change_detection", True), "change_threshold": settings.get("background_change_threshold", 4)})
+                    self._json({"session": session})
                 elif path == "/api/capture-note/prompt":
                     self._json({"capture_note": recorder.notes.open_prompt(context.clips)})
                 elif path == "/api/capture-note":
@@ -218,12 +231,23 @@ def create_handler(
                     self._json({"clip": context.clips.start(context.settings_store.load())})
                 elif path == "/api/clips/stop":
                     self._json({"clip": context.clips.stop()})
+                elif path == "/api/lms/open-clips":
+                    session_id = payload.get("session_id", "")
+                    session = context.store.load_session(session_id)
+                    if session["mode"] != "lms":
+                        raise ValueError("Choose an LMS content session")
+                    folder = context.root / "clips" / session_id
+                    folder.mkdir(parents=True, exist_ok=True)
+                    open_folder(folder)
+                    self._json({"path": str(folder)})
                 elif path == "/api/clips/open-folder":
                     folder = context.root / "clips"
                     folder.mkdir(parents=True, exist_ok=True)
                     open_folder(folder)
                     self._json({"path": str(folder)})
                 elif path == "/api/record/start":
+                    if payload.get("mode") == "lms" and context.clips.status()["active"]:
+                        raise ValueError("Finish the current clip before starting an LMS lesson")
                     session = recorder.start(
                         payload.get("mode", "evidence"),
                         payload.get("metadata", {}),
@@ -231,8 +255,12 @@ def create_handler(
                     )
                     self._json({"session": session})
                 elif path == "/api/record/stop":
+                    if recorder.active_mode == "lms" and context.clips.status().get("session_id") == recorder.active_session_id:
+                        context.clips.stop()
                     self._json({"session": recorder.stop()})
                 elif path == "/api/record/pause":
+                    if recorder.active_mode == "lms" and context.clips.status().get("session_id") == recorder.active_session_id:
+                        context.clips.stop()
                     recorder.pause()
                     self._json(recorder.status())
                 elif path == "/api/record/resume":
@@ -448,6 +476,10 @@ def run_server(root: Path, host: str = "127.0.0.1", port: int = 8765, on_ready: 
     handler = create_handler(root, store, recorder, hotkeys, startup, settings_store, scheduler, clips)
     server = ThreadingHTTPServer((host, port), handler)
     tray_icon = None
+    previous_signals = {}
+    if threading.current_thread() is threading.main_thread():
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous_signals[signum] = signal.signal(signum, lambda *_: request_shutdown(server))
     try:
         scheduler.start()
         hotkeys.start()
@@ -458,11 +490,12 @@ def run_server(root: Path, host: str = "127.0.0.1", port: int = 8765, on_ready: 
             on_ready()
         server.serve_forever()
     finally:
-        if tray_icon is not None:
-            tray_icon.stop()
-        hotkeys.stop()
-        scheduler.stop()
-        recorder.stop()
-        clips.close()
-        server.server_close()
+        stop_tray(tray_icon)
+        for cleanup in (hotkeys.stop, scheduler.stop, recorder.stop, clips.close, server.server_close):
+            try:
+                cleanup()
+            except Exception:
+                logging.exception("Application cleanup failed")
+        for signum, previous in previous_signals.items():
+            signal.signal(signum, previous)
     return server

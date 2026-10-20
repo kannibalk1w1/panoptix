@@ -379,3 +379,30 @@ Skip this section on a single-screen PC.
 - [ ] Click native Wayland and Xwayland application controls. Verify screenshots, marker coordinates (including display scaling/negative display origins) and captions. Confirm pause and open caption prompts suppress capture.
 - [ ] Stop Evidence Capture. Confirm subsequent clicks collect nothing. Disable the effect and confirm the dashboard reports that the bridge is disconnected.
 - [ ] After a KWin upgrade, rebuild the optional bridge before enabling it again.
+
+
+## LMS Content Capture mode
+
+- [ ] Open LMS Content Capture from the sidebar and Home. Enter course, lesson, objective/context and author, then start.
+- [ ] Confirm manual mode takes no automatic interval or click screenshots. Add a caption and take a manual screenshot; verify title/context in Review and HTML/PDF export.
+- [ ] Set lesson-specific clip duration, frame rate and GIF preference. Record a clip with the shortcut and verify settings, lesson context and caption in clip.json under clips/<session-id>.
+- [ ] Pause during a lesson clip and confirm it finishes. Confirm screenshot/clip controls are disabled until resumed. Finish and review; confirm saved screenshots and the lesson clips folder are accessible.
+- [ ] Start another lesson with automatic click capture enabled. Verify clicks on Windows/X11 or via the KWin extension on KDE Wayland, including captions and pause/popup suppression.
+- [ ] Confirm an existing active clip must finish before starting an LMS lesson. Check Evidence Capture, Observation and independent clips still behave as before.
+
+
+## Quit and tray cleanup
+
+- [ ] Close the browser tab and confirm background capture continues as intended.
+- [ ] Choose Quit Panoptix from the tray menu; confirm its icon disappears, the local server stops and no panoptix process remains. Repeat after reopening.
+- [ ] Quit from the dashboard sidebar and using panoptix --quit. Confirm active recordings are finalized and an in-progress clip keeps its collected PNGs and metadata.
+- [ ] On KDE/Xwayland, check that clicking a tray icon without menu support opens the dashboard, where Quit remains available.
+- [ ] Send SIGTERM to a test instance and confirm the same cleanup occurs.
+
+
+## Native KDE tray menu
+
+- [ ] Confirm python-pyqt6 is installed by the native Arch package. Launch Panoptix and right-click its KDE tray icon; check Open dashboard, capture controls and Quit Panoptix are visible.
+- [ ] Select Quit Panoptix from that menu; confirm both the application and native tray helper exit and the StatusNotifier item disappears.
+- [ ] Quit from the dashboard and CLI; verify the native tray is also removed. Check that closing only the browser tab continues background capture, as described on Home.
+- [ ] Terminate the parent test process unexpectedly; confirm the tray helper detects its control pipe closing and exits instead of leaving an orphan icon.

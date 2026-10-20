@@ -77,6 +77,70 @@ class BrowserReviewTests(unittest.TestCase):
     def note(self, index):
         return self.page.locator(f'[data-event="{index}"][data-field="staff_note"]')
 
+    def test_dashboard_quit_stops_server_and_shows_closed_state(self):
+        self.page.locator('#quit-app').click()
+        expect(self.page.get_by_role("heading", name="Panoptix has quit")).to_be_visible()
+        expect(self.page.locator('#status')).to_have_text("Panoptix closed")
+        self.thread.join(timeout=2)
+        self.assertFalse(self.thread.is_alive())
+        self.assertTrue(self.page.evaluate("appQuitting"))
+
+    def test_dashboard_quit_confirms_discarding_actual_review_drafts(self):
+        self.open_review()
+        self.note(1).fill("Unsaved review note")
+        self.page.locator('#quit-app').click()
+        expect(self.page.get_by_role("heading", name="Panoptix has quit")).to_be_visible()
+        self.assertTrue(any("discard unsaved review edits" in message for message in self.dialogs))
+        self.assertEqual(self.page.evaluate("reviewDrafts.size"), 0)
+
+    def test_lms_mode_collects_captioned_steps_and_lesson_clips(self):
+        self.page.locator('[data-view="lms"]').click()
+        expect(self.page.locator('#page-title')).to_have_text("LMS Content Capture")
+        self.assertEqual(self.page.locator('[name="cyp"]').count(), 0)
+        self.page.locator('[name="course"]').fill("Desktop basics")
+        self.page.locator('[name="activity"]').fill("Opening a project")
+        self.page.locator('[name="learning_context"]').fill("Locate and open an existing project")
+        self.page.locator('[name="clip_duration_seconds"]').fill("1")
+        self.page.locator('[name="clip_fps"]').fill("2")
+        self.page.locator('#lms-start-form button[type="submit"]').click()
+        expect(self.page.locator('#lms-finish')).to_be_visible()
+        sid = self.recorder.active_session_id
+        self.assertEqual(self.recorder.active_mode, "lms")
+        self.assertFalse(self.recorder.status()["click_capture_enabled"])
+        with patch.object(self.recorder.notes, "prompt", return_value={"title": "Open file", "staff_note": "Choose File then Open"}):
+            self.page.locator('[data-caption-prompt]').click()
+            expect(self.page.locator('[data-capture-note-status]')).to_contain_text("Next capture: Open file", timeout=10000)
+        self.page.locator('[data-lms-screenshot]').click()
+        expect(self.page.locator('[data-live-event-count]')).to_have_text("1")
+        self.page.locator('[data-clip-start]').click()
+        expect(self.page.locator('[data-clip-status]')).to_contain_text("finished", timeout=10000)
+        self.assertEqual(self.clips.status()["session_id"], sid)
+        self.assertTrue(Path(self.clips.status()["folder"]).is_relative_to(self.root / "clips" / sid))
+        self.page.locator('#lms-finish').click()
+        expect(self.page.locator('[data-event="1"][data-field="title"]')).to_have_value("Open file")
+        expect(self.note(1)).to_have_value("Choose File then Open")
+        expect(self.page.get_by_text("Desktop basics — Locate and open an existing project")).to_be_visible()
+        with patch("panoptix_app.server.open_folder") as opener:
+            with self.page.expect_response("**/api/lms/open-clips"):
+                self.page.locator('#review-lms-clips').click()
+            opener.assert_called_once_with(self.root / "clips" / sid)
+        self.assertFalse(self.recorder.status()["active"])
+
+    def test_lms_pause_preserves_lesson_and_disables_capture_controls(self):
+        self.page.locator('[data-view="lms"]').click()
+        self.page.locator('[name="activity"]').fill("Optional click workflow")
+        self.page.locator('[name="capture_clicks"]').check()
+        self.page.locator('#lms-start-form button[type="submit"]').click()
+        expect(self.page.locator('#lms-finish')).to_be_visible()
+        self.assertTrue(self.recorder.status()["click_capture_enabled"])
+        self.page.locator('#banner-pause').click()
+        expect(self.page.locator('[data-lms-screenshot]')).to_be_disabled()
+        expect(self.page.locator('[data-clip-start]')).to_be_disabled()
+        expect(self.page.get_by_role("heading", name="Optional click workflow")).to_be_visible()
+        self.page.locator('#banner-pause').click()
+        expect(self.page.locator('[data-lms-screenshot]')).to_be_enabled()
+        expect(self.page.locator('[data-clip-start]')).to_be_enabled()
+
     def test_caption_popup_saves_next_capture_title_and_context(self):
         self.page.locator('[data-view="settings"]').click()
         self.page.locator('[name="capture_note_hotkey_enabled"]').check()
