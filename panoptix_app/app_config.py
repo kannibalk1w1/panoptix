@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,8 @@ def get_config_dir() -> Path:
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
         return Path(local_app_data) / "Panoptix"
+    if sys.platform.startswith("linux"):
+        return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "panoptix"
     return Path.home() / ".panoptix"
 
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import shutil
 from typing import Any, Callable
+from pathlib import Path
 
 
 PICKER_SCRIPT = """
@@ -17,7 +19,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
 
 
 def is_available() -> bool:
-    return sys.platform == "win32"
+    return sys.platform == "win32" or (sys.platform.startswith("linux") and shutil.which("kdialog") is not None)
 
 
 def pick_folder(initial: str = "", runner: Callable[[str], str] | None = None) -> dict[str, Any]:
@@ -27,9 +29,9 @@ def pick_folder(initial: str = "", runner: Callable[[str], str] | None = None) -
                 "available": False,
                 "path": "",
                 "cancelled": False,
-                "error": "The folder browser is only available on Windows; type the folder path instead.",
+                "error": "Install kdialog on Linux to browse folders, or type the folder path instead.",
             }
-        runner = run_windows_picker
+        runner = run_linux_picker if sys.platform.startswith("linux") else run_windows_picker
     try:
         selected = (runner(initial) or "").strip()
     except Exception as exc:
@@ -53,4 +55,16 @@ def run_windows_picker(initial: str) -> str:
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "The folder browser could not be opened.")
+    return result.stdout.strip()
+
+
+def run_linux_picker(initial: str) -> str:
+    result = subprocess.run(
+        ["kdialog", "--title", "Choose a folder for Panoptix", "--getexistingdirectory", initial or str(Path.home())],
+        capture_output=True, text=True, timeout=600,
+    )
+    if result.returncode == 1:
+        return ""
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "The folder browser could not be opened")
     return result.stdout.strip()

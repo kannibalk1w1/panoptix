@@ -10,8 +10,80 @@ Windows builds are attached to each release on the
 - **Panoptix-Setup-<version>.exe** — installer, adds shortcuts and optional startup.
 - **[Panoptix.exe](https://github.com/kannibalk1w1/panoptix/releases/latest/download/Panoptix.exe)** — single file, no install.
 
-64-bit Windows only. The binaries are unsigned, so SmartScreen warns on first run;
+Windows downloads are for 64-bit Windows. The binaries are unsigned, so SmartScreen warns on first run;
 choose **More info** then **Run anyway**. Each release lists SHA-256 checksums.
+
+## CachyOS / Arch Linux (KDE Plasma)
+
+Native x86_64 Linux downloads are attached to Linux-enabled releases:
+
+- `panoptix-<version>-1-x86_64.pkg.tar.zst`: install using
+  `sudo pacman -U ./panoptix-<version>-1-x86_64.pkg.tar.zst`, then launch Panoptix
+  from the application menu or run `panoptix`.
+- `panoptix-<version>-linux-x86_64.tar.gz`: extract, install system dependencies
+  `sudo pacman -S --needed spectacle kdialog xdg-utils`, then run `./panoptix`
+  inside the extracted folder. Keep the `_internal` folder alongside the binary.
+
+On KDE Wayland, screenshots use Spectacle rather than Xwayland. Caption and folder
+prompts use KDialog. Spectacle startup and PNG encoding limit the achievable frame
+rate; the configured rate remains a target. Timings are saved with the frames.
+Data defaults to `~/.local/share/panoptix` and configuration to
+`~/.config/panoptix`; XDG overrides and PANOPTIX_DATA_DIR/PANOPTIX_CONFIG_DIR are
+supported. Start at login uses a standard XDG autostart desktop entry.
+
+In **Plasma Settings → Keyboard → Shortcuts**, add these commands with your chosen
+key combinations (keep Panoptix running):
+
+| Command | Suggested shortcut | Action |
+| --- | --- | --- |
+| `panoptix --caption` | Ctrl+Alt+N | Caption the next capture |
+| `panoptix --clip` | Ctrl+Alt+R | Record a timed clip |
+| `panoptix --capture` | Ctrl+Alt+P | Manual screenshot in an active session |
+
+These desktop shortcuts apply on Wayland instead of the pynput hotkey settings.
+The portable archive requires an absolute path to its `panoptix` executable in
+shortcut commands.
+
+### Capture on click under KDE Wayland
+
+Install the optional `panoptix-kwin-click` package matching your **exact KWin
+version**, then enable **Panoptix click capture** under **System Settings →
+Window Management → Desktop Effects**. Start an Evidence Capture session in
+Panoptix; the dashboard reports whether the click bridge is connected. It can
+take about one second for a newly started session to reach the extension.
+
+The extension observes left-button presses in KWin and asynchronously forwards
+positions to Panoptix on localhost, only while the session is active. It does not
+intercept clicks or request access to raw keyboard/input devices. Panoptix checks
+pause, session identity and caption-popup state again before collecting an image.
+Markers account for desktop scaling and monitors left/above the primary screen.
+
+KWin plugin interfaces can change between updates. The optional package pins its
+KWin dependency; rebuild it for a new KWin before upgrading. Source is included
+in the portable archive under `kwin-click-source`, and in the installed app under
+`/usr/share/panoptix/kwin-click-source`. To compile from the repository on CachyOS:
+
+```bash
+sudo pacman -S --needed base-devel cmake ninja extra-cmake-modules kwin vulkan-headers
+bash scripts/build_kwin.sh 2.2.0
+sudo pacman -U dist/panoptix-kwin-click-*.pkg.tar.zst
+```
+
+The extension is optional and disabled by default. X11 sessions continue using
+the regular global mouse/keyboard hooks.
+
+### Build Linux packages from source
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt pyinstaller
+PANOPTIX_BUILD_PYTHON=.venv/bin/python bash scripts/build_linux.sh 2.2.0
+```
+
+This writes a portable archive and native Arch package to `dist`. Use
+`--archive-only` as the second argument when `makepkg` is unavailable. Build on
+CachyOS/Arch for its current libraries, or use the Linux GitHub Actions workflow.
+Other Wayland compositors are not supported by the KDE capture backend.
 
 ## Run
 
@@ -174,10 +246,12 @@ installation. The Windows build workflow runs both test suites before packaging.
 ## Caption The Next Capture
 
 Enable **Settings → Caption next capture → Enable caption popup hotkey**, then
-save. **Ctrl+Alt+N** opens a small native Windows text box over the application
+save. **Ctrl+Alt+N** opens a native caption prompt over the application
 you are using. Enter a title/instruction such as **Open file** and, optionally,
 a context note explaining what the capture is for. Press **Enter** from the
 title field (or click **Save for next capture**), then perform the action.
+KDE uses separate title and multiline context prompts; cancelling either keeps
+the original pending caption.
 **Escape** or **Cancel** closes the popup without changing any pending caption.
 The context field supports multiple lines; use the Save button to confirm it.
 

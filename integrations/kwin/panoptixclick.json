@@ -1,0 +1,10 @@
+{
+    "KPlugin": {
+        "Id": "panoptixclick",
+        "Name": "Panoptix click capture",
+        "Description": "Forward left-click positions to a local active Panoptix evidence session",
+        "Category": "Tools",
+        "License": "GPL-2.0-or-later",
+        "EnabledByDefault": false
+    }
+}

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+from .desktop import is_wayland
+
 
 class GlobalMouseHook:
     def __init__(self, on_click: Callable[[int, int], None]):
@@ -9,6 +11,8 @@ class GlobalMouseHook:
         self._listener = None
 
     def start(self) -> None:
+        if is_wayland():
+            return  # The optional KWin effect forwards clicks through the local API.
         try:
             from pynput import mouse
         except ImportError as exc:

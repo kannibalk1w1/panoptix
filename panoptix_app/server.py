@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import time
+import math
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
@@ -26,6 +28,7 @@ from .exporter import (
     export_destination_status,
 )
 from .clips import ClipRecorder
+from .desktop import is_wayland, is_kde
 from .hotkeys import HotkeyService
 from .redaction import redact_event_screenshot, restore_original_screenshot
 from .recorder import Recorder
@@ -94,6 +97,7 @@ def create_handler(
     scheduler: BackgroundScheduler | None = None,
     clips: ClipRecorder | None = None,
 ):
+    bridge_state = {"last_seen": 0.0}
     frontend_dir = get_project_root() / "frontend"
     context = DataContext(root, store, recorder, settings_store, clips)
 
@@ -111,6 +115,10 @@ def create_handler(
             settings = context.settings_store.last_good
             storage_error = str(exc)
         status = recorder.status()
+        connected = time.monotonic() - bridge_state["last_seen"] < 4
+        status["desktop"] = {"wayland": is_wayland(), "kde": is_kde(), "click_bridge_connected": connected}
+        if is_wayland() and status["active"] and status["mode"] == "evidence" and not connected:
+            status["hook_error"] = "Enable the Panoptix click capture KWin effect, or use manual screenshots."
         status["clip"] = {
             **context.clips.status(),
             "shortcut": settings.get("clip_hotkey"),
@@ -160,6 +168,10 @@ def create_handler(
             try:
                 if path == "/api/status":
                     self._json(app_status())
+                elif path == "/api/desktop/kwin":
+                    bridge_state["last_seen"] = time.monotonic()
+                    state = recorder.status()
+                    self._json({"active": state["active"] and state["mode"] == "evidence" and not state["paused"] and not recorder.notes.status()["editing"], "session_id": state["session_id"]})
                 elif path == "/api/settings":
                     settings = context.settings_store.load()
                     self._json({"settings": settings, "timetable": timetable_for_editor(settings)})
@@ -189,7 +201,16 @@ def create_handler(
             path = urlparse(self.path).path
             try:
                 payload = self._payload()
-                if path == "/api/capture-note/prompt":
+                if path == "/api/desktop/kwin-click":
+                    geometry = payload.get("desktop_geometry", {})
+                    values = [payload.get("x"), payload.get("y"), *(geometry.get(key) for key in ("left", "top", "width", "height"))]
+                    if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in values) or geometry["width"] <= 0 or geometry["height"] <= 0:
+                        raise ValueError("Click coordinates and desktop geometry must be finite, with positive dimensions")
+                    state = recorder.status()
+                    if state["mode"] == "evidence" and payload.get("session_id") == state["session_id"]:
+                        recorder._queue_click_capture(payload["x"], payload["y"], payload["session_id"], geometry)
+                    self._json({"ok": True})
+                elif path == "/api/capture-note/prompt":
                     self._json({"capture_note": recorder.notes.open_prompt(context.clips)})
                 elif path == "/api/capture-note":
                     self._json({"capture_note": recorder.notes.set(payload.get("title", ""), payload.get("staff_note", ""))})
@@ -217,6 +238,8 @@ def create_handler(
                 elif path == "/api/record/resume":
                     recorder.resume()
                     self._json(recorder.status())
+                elif path == "/api/capture/manual":
+                    self._json({"event": recorder.capture_manual_hotkey()})
                 elif path == "/api/capture/click":
                     event = recorder.capture_click(int(payload["x"]), int(payload["y"]))
                     self._json({"event": event})

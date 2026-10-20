@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, Callable
 import logging
 
+from .desktop import is_wayland
+
 
 class HotkeyService:
     def __init__(self, settings_store: Any, recorder: Any, listener_factory: Callable | None = None, clip_recorder: Any | None = None):
@@ -15,6 +17,9 @@ class HotkeyService:
 
     def start(self) -> None:
         self.error = None
+        if is_wayland() and self.listener_factory is None:
+            self.error = "Assign panoptix --caption, --clip and --capture in Plasma Settings → Keyboard → Shortcuts."
+            return
         settings = self.settings_store.load()
         mapping = {}
         if settings.get("manual_hotkey_enabled") and settings.get("manual_hotkey"):

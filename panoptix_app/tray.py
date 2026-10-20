@@ -8,7 +8,7 @@ def start_tray(url: str, recorder: Any, settings_store: Any, server: Any):
     try:
         import pystray
         from PIL import Image, ImageDraw
-    except ImportError:
+    except (ImportError, OSError):
         return None
 
     def open_dashboard(icon=None, item=None) -> None:
@@ -66,5 +66,8 @@ def start_tray(url: str, recorder: Any, settings_store: Any, server: Any):
             pystray.MenuItem("Quit Panoptix", quit_panoptix),
         ),
     )
-    icon.run_detached()
+    try:
+        icon.run_detached()
+    except Exception:
+        return None  # Keep the dashboard usable when a tray is unavailable.
     return icon

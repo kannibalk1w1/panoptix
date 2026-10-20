@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import base64
+import shutil
+import subprocess
+
+from .desktop import is_wayland, is_kde
 from pathlib import Path
 
 
@@ -34,6 +38,19 @@ class ScreenCapture:
         self.last_origin: tuple[int, int] = (0, 0)
 
     def capture(self, output_dir: Path, filename: str, marker: tuple[int, int] | None = None) -> Path:
+        if is_wayland():
+            if not is_kde() or not shutil.which("spectacle"):
+                raise RuntimeError("Wayland capture requires KDE Plasma and Spectacle. Install spectacle on CachyOS.")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            path = (output_dir / filename).resolve()
+            result = subprocess.run(
+                ["spectacle", "--background", "--nonotify", "--fullscreen", "--scaled", "--output", str(path)],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode or not path.is_file():
+                raise RuntimeError(result.stderr.strip() or "Spectacle did not produce a screenshot")
+            self.last_origin = (0, 0)
+            return path
         try:
             import mss
             from PIL import Image, ImageDraw

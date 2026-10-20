@@ -17,6 +17,8 @@ def default_data_root() -> Path:
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
         return Path(local_app_data) / "Panoptix" / "data"
+    if sys.platform.startswith("linux"):
+        return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "panoptix"
     return get_project_root() / "data"
 
 

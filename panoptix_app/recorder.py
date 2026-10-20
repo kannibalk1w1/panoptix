@@ -201,7 +201,7 @@ class Recorder:
             self._pause_event.clear()
 
     @capture_operation
-    def capture_click(self, x: int, y: int) -> dict[str, Any]:
+    def capture_click(self, x: int, y: int, desktop_geometry: dict | None = None) -> dict[str, Any]:
         with self._lock:
             self._require_active()
             if self.active_mode != "evidence":
@@ -216,6 +216,11 @@ class Recorder:
             # virtual-desktop space and into pixels on the saved image.
             origin = getattr(self.capture, "last_origin", (0, 0))
             image_x, image_y = to_image_coordinates(x, y, origin)
+            if desktop_geometry is not None:
+                from PIL import Image
+                with Image.open(original) as image:
+                    image_x = round((x - desktop_geometry["left"]) * image.width / desktop_geometry["width"])
+                    image_y = round((y - desktop_geometry["top"]) * image.height / desktop_geometry["height"])
             screenshot = annotate_click(original, screenshot_dir / filename, image_x, image_y, marker)
             event = {
                 "type": "click",
@@ -234,23 +239,23 @@ class Recorder:
             }
             return self._save_captioned_event(session_id, event)
 
-    def _queue_click_capture(self, x: int, y: int, session_id: str | None = None) -> None:
+    def _queue_click_capture(self, x: int, y: int, session_id: str | None = None, desktop_geometry: dict | None = None) -> None:
         with self._lock:
             if self.active_session_id is None or self._stop_event.is_set() or self._pause_event.is_set() or self.notes.status()["editing"]:
                 return
             if session_id is not None and session_id != self.active_session_id:
                 return
-            thread = threading.Thread(target=self._capture_queued_click, args=(x, y, self.active_session_id), daemon=True)
+            thread = threading.Thread(target=self._capture_queued_click, args=(x, y, self.active_session_id, desktop_geometry), daemon=True)
             self._click_threads.append(thread)
             thread.start()
 
-    def _capture_queued_click(self, x: int, y: int, session_id: str) -> None:
+    def _capture_queued_click(self, x: int, y: int, session_id: str, desktop_geometry: dict | None = None) -> None:
         thread = threading.current_thread()
         try:
             with self._lock:
                 if session_id != self.active_session_id:
                     return
-                self.capture_click(x, y)
+                self.capture_click(x, y, desktop_geometry=desktop_geometry)
         except Exception:
             pass
         finally:

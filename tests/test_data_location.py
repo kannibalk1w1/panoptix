@@ -128,12 +128,12 @@ class FolderPickerTests(unittest.TestCase):
         self.assertEqual(result["path"], "")
         self.assertEqual(result["error"], "dialog failed")
 
-    def test_picker_is_unavailable_off_windows(self):
-        with patch("panoptix_app.folder_picker.sys.platform", "linux"):
+    def test_picker_is_unavailable_without_linux_dialog_tool(self):
+        with patch("panoptix_app.folder_picker.sys.platform", "linux"), patch("panoptix_app.folder_picker.shutil.which", return_value=None):
             result = pick_folder()
 
         self.assertFalse(result["available"])
-        self.assertIn("Windows", result["error"])
+        self.assertIn("kdialog", result["error"])
 
 
 class SwitchRootTests(unittest.TestCase):

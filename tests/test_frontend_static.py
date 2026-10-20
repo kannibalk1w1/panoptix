@@ -107,7 +107,7 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("renderSystemStatus", app_js)
         self.assertIn("Skipped unchanged frames", app_js)
         self.assertIn("Export folder warning", app_js)
-        self.assertIn("Windows startup", app_js)
+        self.assertIn("Start at login", app_js)
         self.assertIn("Manual hotkey", app_js)
 
     def test_review_exports_require_personal_data_acknowledgement(self):

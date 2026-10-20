@@ -223,6 +223,7 @@ function renderCaptionCard() {
   const note = latestStatus.capture_note || {};
   return `<section class="card">
     <h2>Caption next capture</h2>
+    ${latestStatus.desktop?.wayland ? `<p class="muted">On KDE Wayland, assign <code>panoptix --caption</code>, <code>panoptix --clip</code> and <code>panoptix --capture</code> in Plasma Settings → Keyboard → Shortcuts. Start a session before taking manual screenshots. For automatic click capture, install and enable the Panoptix click capture KWin effect. ${latestStatus.desktop?.click_bridge_connected ? "Click bridge connected." : "Click bridge not connected."}</p>` : ""}
     <p class="muted">Open a text box, enter an instruction such as “Open file” or a context note, then save and perform the action. The next click capture, manual screenshot or new clip receives the text. Automatic interval screenshots leave it pending.</p>
     <p class="muted">Click capture requires an active Evidence Capture session. The popup waits until any active clip has finished.</p>
     <p class="muted">Shortcut: ${escapeHtml(note.hotkey_enabled ? note.shortcut : "disabled — enable in Settings")}</p>
@@ -500,7 +501,7 @@ function renderSystemStatus() {
           <p class="muted">${escapeHtml(hotkeyStatus)}</p>
         </div>
         <div>
-          <strong>Windows startup</strong>
+          <strong>Start at login</strong>
           <p class="muted">${startup.requested ? "Requested" : "Off"} - ${startup.installed ? "installed" : "not installed"}</p>
         </div>
       </div>
@@ -1149,7 +1150,7 @@ async function renderSettings() {
       <label class="check-row"><input name="background_change_detection" type="checkbox" ${settings.background_change_detection ? "checked" : ""}> Skip unchanged passive screenshots</label>
       <label>Change sensitivity threshold <input name="background_change_threshold" type="number" min="1" value="${escapeAttr(settings.background_change_threshold)}"></label>
       <h2>Caption next capture</h2>
-      <p class="muted">Opens a Windows text box for a title/instruction and context note. Save to attach the text to the next click capture, manual screenshot or new clip. Enter saves from the title field; Escape cancels.</p>
+      <p class="muted">Opens a native text box for a title/instruction and context note. Save to attach the text to the next click capture, manual screenshot or new clip. Enter saves from the title field; Escape cancels.</p>
       <label class="check-row"><input name="capture_note_hotkey_enabled" type="checkbox" ${settings.capture_note_hotkey_enabled ? "checked" : ""}> Enable caption popup hotkey</label>
       <label>Caption popup hotkey <input name="capture_note_hotkey" value="${escapeAttr(settings.capture_note_hotkey)}" placeholder="<ctrl>+<alt>+n"></label>
       <h2>LMS screen clips</h2>
@@ -1161,7 +1162,7 @@ async function renderSettings() {
       <label class="check-row"><input name="clip_make_gif" type="checkbox" ${settings.clip_make_gif ? "checked" : ""}> Also create an animated GIF</label>
       <p class="muted">Frame rate is a target; slower capture or storage may save fewer frames. PNGs are always kept for overlays and editing.</p>
       <h2>Manual capture hotkey</h2>
-      <label class="check-row"><input name="launch_on_startup" type="checkbox" ${settings.launch_on_startup ? "checked" : ""}> Open Panoptix with Windows startup</label>
+      <label class="check-row"><input name="launch_on_startup" type="checkbox" ${settings.launch_on_startup ? "checked" : ""}> Open Panoptix at login</label>
       <label class="check-row"><input name="manual_hotkey_enabled" type="checkbox" ${settings.manual_hotkey_enabled ? "checked" : ""}> Enable manual CYP capture hotkey</label>
       <label>Hotkey <input name="manual_hotkey" value="${escapeAttr(settings.manual_hotkey)}" placeholder="<ctrl>+<alt>+p"></label>
       <label>Retention days <input name="retention_days" type="number" min="1" value="${escapeAttr(settings.retention_days)}"></label>

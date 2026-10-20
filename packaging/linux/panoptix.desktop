@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Application
+Name=Panoptix
+Comment=Capture work and captions for LMS evidence
+Exec=panoptix
+Icon=panoptix
+Terminal=false
+Categories=Education;Utility;
+Actions=Caption;Clip;Capture;
+
+[Desktop Action Caption]
+Name=Caption next capture
+Exec=panoptix --caption
+
+[Desktop Action Clip]
+Name=Record LMS clip
+Exec=panoptix --clip
+
+[Desktop Action Capture]
+Name=Capture screenshot
+Exec=panoptix --capture

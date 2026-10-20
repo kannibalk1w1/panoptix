@@ -367,3 +367,15 @@ Skip this section on a single-screen PC.
 - [ ] Press Escape to cancel; verify the previous pending text remains. Reopen the popup to edit it or use Home → Clear pending caption.
 - [ ] Caption a clip before recording it; verify title and context in clip.json. Confirm an active clip blocks the popup and an open popup blocks starting a clip.
 - [ ] Save multiline context, Unicode text and punctuation; verify text is preserved. Change the shortcut and confirm the new shortcut works.
+
+
+## CachyOS / KDE Wayland
+
+- [ ] Install the native panoptix package and launch it from the application menu. Confirm data is stored under ~/.local/share/panoptix and configuration under ~/.config/panoptix.
+- [ ] Capture a manual screenshot and a timed clip. Confirm all displays appear, including native Wayland windows; check full-resolution PNGs and GIF timing at the achievable frame rate.
+- [ ] Set Plasma shortcuts for panoptix --caption, --capture and --clip. Confirm caption title/context prompts and KDialog folder browsing work.
+- [ ] Enable Start at login; confirm ~/.config/autostart/panoptix.desktop points to the installed binary. Disable it and confirm the file is removed.
+- [ ] Install the optional click bridge package matching the installed KWin version. Enable Panoptix click capture in Desktop Effects; start Evidence Capture and confirm the bridge reports connected after about one second.
+- [ ] Click native Wayland and Xwayland application controls. Verify screenshots, marker coordinates (including display scaling/negative display origins) and captions. Confirm pause and open caption prompts suppress capture.
+- [ ] Stop Evidence Capture. Confirm subsequent clicks collect nothing. Disable the effect and confirm the dashboard reports that the bridge is disconnected.
+- [ ] After a KWin upgrade, rebuild the optional bridge before enabling it again.

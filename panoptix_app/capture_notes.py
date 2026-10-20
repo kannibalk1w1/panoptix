@@ -1,4 +1,4 @@
-"""One-shot captions for deliberate captures, with a native Windows prompt."""
+"""One-shot captions for deliberate captures, with native desktop prompts."""
 from __future__ import annotations
 
 from contextlib import nullcontext
@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import shutil
 import threading
 import time
 
@@ -75,8 +76,26 @@ try {
 
 
 def show_capture_note(initial: dict) -> dict | None:
+    if sys.platform.startswith("linux"):
+        if not shutil.which("kdialog"):
+            raise RuntimeError("Install kdialog to open the native caption prompt on CachyOS")
+        fields = {}
+        for key, option, message in (
+            ("title", "--inputbox", "Title / instruction for the next capture (optional):"),
+            ("staff_note", "--textinputbox", "Context note for the next capture (optional):"),
+        ):
+            result = subprocess.run(
+                ["kdialog", "--title", "Panoptix — Caption next capture", option, message, initial.get(key, "")],
+                capture_output=True, text=True, timeout=600,
+            )
+            if result.returncode == 1:
+                return None
+            if result.returncode:
+                raise RuntimeError(result.stderr.strip() or "The caption popup could not be opened")
+            fields[key] = result.stdout.removesuffix("\n")
+        return fields
     if sys.platform != "win32":
-        raise RuntimeError("The caption popup is available on Windows.")
+        raise RuntimeError("Caption popups support Windows and KDE Linux")
     result = subprocess.run(
         ["powershell", "-NoProfile", "-STA", "-Command", PROMPT_SCRIPT],
         env={**os.environ, "PANOPTIX_CAPTURE_NOTE": json.dumps(initial)},

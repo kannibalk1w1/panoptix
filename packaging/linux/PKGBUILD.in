@@ -1,0 +1,22 @@
+pkgname=panoptix
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='Local LMS evidence capture with timed clips and free-text captions'
+arch=('x86_64')
+url='https://github.com/kannibalk1w1/panoptix'
+depends=('glibc' 'zlib' 'libx11' 'libxcb' 'libxext' 'libxfixes' 'libxrandr' 'xdg-utils' 'spectacle' 'kdialog')
+options=('!strip')
+source=("$url/releases/download/v$pkgver/panoptix-$pkgver-linux-x86_64.tar.gz")
+sha256sums=('@SHA256@')
+
+package() {
+    local bundle="$srcdir/panoptix-$pkgver-linux-x86_64"
+    install -d "$pkgdir/opt/panoptix" "$pkgdir/usr/bin"
+    cp -a "$bundle/panoptix" "$bundle/_internal" "$pkgdir/opt/panoptix/"
+    ln -s /opt/panoptix/panoptix "$pkgdir/usr/bin/panoptix"
+    install -Dm644 "$bundle/panoptix.desktop" "$pkgdir/usr/share/applications/panoptix.desktop"
+    install -Dm644 "$bundle/panoptix.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/panoptix.png"
+    install -d "$pkgdir/usr/share/panoptix"
+    cp -a "$bundle/kwin-click-source" "$pkgdir/usr/share/panoptix/"
+    install -Dm644 "$bundle/README.md" "$pkgdir/usr/share/doc/panoptix/README.md"
+}

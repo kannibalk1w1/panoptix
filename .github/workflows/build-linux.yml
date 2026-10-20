@@ -1,0 +1,61 @@
+name: Build Linux (CachyOS and Arch)
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version for the Linux archive and package
+        default: '2.2.0'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth libxtst6 libxrandr2 libxfixes3
+          python -m pip install pyinstaller -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+      - name: Run regression tests
+        run: |
+          xvfb-run -a env XDG_SESSION_TYPE=x11 DESKTOP_SESSION= WAYLAND_DISPLAY= python -m unittest discover -s tests -t . -v
+          xvfb-run -a env XDG_SESSION_TYPE=x11 DESKTOP_SESSION= WAYLAND_DISPLAY= python -m unittest tests.browser_review -v
+      - name: Build portable Linux archive
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${RELEASE_VERSION:-2.2.0}"
+          fi
+          PANOPTIX_BUILD_PYTHON=python xvfb-run -a env XDG_SESSION_TYPE=x11 DESKTOP_SESSION= WAYLAND_DISPLAY= bash scripts/build_linux.sh "$version" --archive-only
+      - name: Build Arch package
+        run: |
+          docker run --rm --volume "$PWD:/work" archlinux:base-devel bash -c '
+            useradd -m builder
+            mkdir /tmp/package
+            cp /work/build/linux-package/PKGBUILD /work/build/linux-package/*.tar.gz /tmp/package/
+            chown -R builder:builder /tmp/package
+            su builder -c "cd /tmp/package && makepkg --nodeps --noconfirm"
+            cp /tmp/package/*.pkg.tar.zst /work/dist/
+          '
+      - name: Upload Linux downloads
+        uses: actions/upload-artifact@v4
+        with:
+          name: Panoptix-Linux-x86_64
+          path: |
+            dist/panoptix-*-linux-x86_64.tar.gz
+            dist/panoptix-*-x86_64.pkg.tar.zst
+          if-no-files-found: error

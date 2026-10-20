@@ -58,7 +58,7 @@ class MultiMonitorCaptureTests(unittest.TestCase):
         module = type(sys)("mss")
         module.mss = lambda: fake
         capture = ScreenCapture()
-        with patch.dict(sys.modules, {"mss": module}):
+        with patch.dict(sys.modules, {"mss": module}), patch("panoptix_app.capture.is_wayland", return_value=False):
             path = capture.capture(Path(output_dir), "001.png", marker)
         return capture, fake, path
 
